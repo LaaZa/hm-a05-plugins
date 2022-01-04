@@ -135,4 +135,5 @@ dmypy.json
 modules/
 static/
 .defaultconf
-!plugins/
+load.order
+plugins/core-*

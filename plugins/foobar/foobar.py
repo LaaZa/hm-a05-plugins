@@ -39,3 +39,18 @@ class Plugin(PluginBase):
     async def on_member_join(self, member, trigger):
         await member.guild.default_channel.send(f'**Hello {member.name}-san!**')
         return True
+
+    @Globals.disco.slash_command(
+        name="test",
+        description="test slash",
+        guild_ids=[257256307000606731],
+    )
+    async def example2_command(interaction: nextcord.Interaction, arg1, arg2: int):
+        # This command is a bit more complex, lets break it down:
+        # 1: name= in the decorator sets the user-facing name of the command.
+        # 2: description= sets the description that users will see for this command.
+        # 3: arg1 was added, defaults to a string response.
+        # 4: arg2 was added and typed as an int, meaning that users will only be able to give ints.
+        await interaction.response.send_message(
+            f"slash command, arg1: {arg1}, arg2: {arg2}"
+        )

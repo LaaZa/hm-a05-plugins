@@ -14,7 +14,7 @@ class Plugin(PluginBase):
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'foobar'
         self.add_trigger('on_message', 'be', True, self.on_message)
-       self.add_trigger('on_member_join', lambda member, **kwargs: True, False, self.on_member_join)
+        self.add_trigger('on_member_join', lambda member, **kwargs: True, False, self.on_member_join)
         self.help = 'just a test'
 
         self.expressions = {

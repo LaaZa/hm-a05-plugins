@@ -18,7 +18,7 @@ class Plugin(PluginBase):
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Polls'
         self.add_trigger('on_message', 'poll', True, self.on_message)
-       self.add_trigger('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
+        self.add_trigger('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
         self.help = 'Make polls'
 
         self.subcommands = {

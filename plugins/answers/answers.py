@@ -12,7 +12,7 @@ class Plugin(PluginBase):
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Answers'
         self.add_trigger('on_message', 'answer', True, self.on_message)
-       self.add_trigger('on_message', re.compile('.+'), False, self.regex_answer)
+        self.add_trigger('on_message', re.compile('.+'), False, self.regex_answer)
         self.help = 'add answers to some regex'
 
         self.answers = {}

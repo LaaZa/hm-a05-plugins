@@ -9,11 +9,10 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Osu stats'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'osu', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'osu', True, self.on_message)
         self.help = 'Get osu stats'
 
         self.base_url = 'https://osu.ppy.sh/api/'

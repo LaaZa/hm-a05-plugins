@@ -11,11 +11,10 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'R/a/dio'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'radio', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'radio', True, self.on_message)
         self.help = 'Get info from R/a/dio'
 
         self.radio = RadioAPI()

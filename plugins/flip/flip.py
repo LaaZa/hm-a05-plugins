@@ -7,11 +7,10 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Flip text'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'upd', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'upd', True, self.on_message)
         self.help = 'Flips a given string upside down'
 
     async def on_message(self, message, trigger):

@@ -13,11 +13,10 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Hmmm'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'hmmm', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'hmmm', True, self.on_message)
         self.help = 'Hmmm'
 
         self.prev_links = defaultdict(list)
@@ -26,7 +25,7 @@ class Plugin(PluginBase):
         try:
             limit = '100'
             msg = self.Command(message)
-            d = feedparser.parse(f'http://www.reddit.com/r/hmmm/.rss?limit={limit}')
+            d = feedparser.parse(f'https://www.reddit.com/r/hmmm/.rss?limit={limit}')
             body = random.choice(d.entries)['content'][0]['value']
             image_link = re.findall(r'<span><a href="(.*?)">\[link\]</a>', body)[0]
 

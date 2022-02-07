@@ -11,7 +11,7 @@ class SimpleWolframAPI:
         self.loaded_xml = ''
         self.root = None
         self._key = key
-        self.api_url = f'http://api.wolframalpha.com/v2/query?appid={self._key}&reinterpret=true&input='
+        self.api_url = f'https://api.wolframalpha.com/v2/query?appid={self._key}&reinterpret=true&input='
         self._query = ''
         self._excludeid = ('BasicUnitDimensions', 'Interpretation')
 
@@ -51,7 +51,7 @@ class SimpleWolframAPI:
                 joined = ' , '.join(re.split(r'\n', pods[1].attrib['title'] + ': ' + pods[1].find('subpod').find('plaintext').text))
                 l.append(joined)
             except Exception:
-                l.append('http://www.wolframalpha.com/input/?i=' + self._query)
+                l.append('https://www.wolframalpha.com/input/?i=' + self._query)
         return l
 
     async def all(self, limit):

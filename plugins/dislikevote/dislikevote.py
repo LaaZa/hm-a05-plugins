@@ -10,12 +10,11 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Dislike Vote'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'dislikevote', True, self.on_message)
-        t.add_event('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'dislikevote', True, self.on_message)
+        self.add_trigger('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
         self.help = 'Removes messages with enough certain reactions. | set :emoji: limit | remove'
 
         self.subcommands = {

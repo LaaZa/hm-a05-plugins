@@ -14,12 +14,11 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Polls'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'poll', True, self.on_message)
-        t.add_event('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'poll', True, self.on_message)
+       self.add_trigger('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
         self.help = 'Make polls'
 
         self.subcommands = {

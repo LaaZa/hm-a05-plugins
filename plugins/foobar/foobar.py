@@ -10,12 +10,11 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'foobar'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'be', True, self.on_message)
-        t.add_event('on_member_join', lambda member, **kwargs: True, False, self.on_member_join)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'be', True, self.on_message)
+       self.add_trigger('on_member_join', lambda member, **kwargs: True, False, self.on_member_join)
         self.help = 'just a test'
 
         self.expressions = {

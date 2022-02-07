@@ -16,12 +16,11 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Wikipedia and Wikia'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'wiki', True, self.on_message_wikipedia)
-        t.add_event('on_message', 'wikia', True, self.on_message_wikia)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'wiki', True, self.on_message_wikipedia)
+        self.add_trigger('on_message', 'wikia', True, self.on_message_wikia)
         self.help = 'Query wikipedia and wikia'
 
     async def on_message_wikipedia(self, message, trigger):

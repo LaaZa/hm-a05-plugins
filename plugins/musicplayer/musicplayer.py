@@ -16,11 +16,10 @@ from plugins.musicplayer.audioplayer import *
 class Plugin(PluginBase):
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Music player'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'mp', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'mp', True, self.on_message)
         self.help = '''Play music!\n
         [add][a] to add url/search term to playlist\n
         [addnext][an] to add to be played next\n

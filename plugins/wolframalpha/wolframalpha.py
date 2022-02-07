@@ -7,11 +7,10 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'WolframAlpha'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'wa', True, self.on_message)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'wa', True, self.on_message)
         self.help = 'Query WolframAlpha'
 
         self.key = Globals.config_data.get_opt('apikeys', 'wolframalpha_key')

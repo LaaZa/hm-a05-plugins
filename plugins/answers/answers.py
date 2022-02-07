@@ -8,12 +8,11 @@ class Plugin(PluginBase):
     # plugin specific
 
     def __init__(self):
+        super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Answers'
-        t = PluginBase.Trigger()
-        t.add_event('on_message', 'answer', True, self.on_message)
-        t.add_event('on_message', re.compile('.+'), False, self.regex_answer)
-        self.trigger = t.functions
+        self.add_trigger('on_message', 'answer', True, self.on_message)
+       self.add_trigger('on_message', re.compile('.+'), False, self.regex_answer)
         self.help = 'add answers to some regex'
 
         self.answers = {}

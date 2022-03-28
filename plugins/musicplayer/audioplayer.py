@@ -4,6 +4,8 @@ from enum import Enum
 import nextcord
 import youtube_dl
 
+from modules.globals import Globals
+
 
 class AudioStatus(Enum):
     PLAYING = 1
@@ -13,20 +15,20 @@ class AudioStatus(Enum):
 
 class AudioEntry:
 
-    def __init__(self, message, player, info):
+    def __init__(self, message, source, info):
         self.added_by = message.author
         self.channel = message.channel
         self.message = message
-        self.player = player
+        self.player = source
         self.info = info
 
 
 class AudioState:
 
-    def __init__(self, client, on_status_change=None, queue_next=None):
+    def __init__(self, on_status_change=None, queue_next=None):
         self.current = None
         self.voice = None
-        self.client = client
+        self.client = Globals.disco
         self.play_next_song = asyncio.Event()
         self.deck = asyncio.Queue()
         self.audio_player = self.client.loop.create_task(self.audio_player_task())

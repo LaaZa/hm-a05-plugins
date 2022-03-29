@@ -1,5 +1,7 @@
 import asyncio
 from enum import Enum
+import inspect
+from random import shuffle
 
 import nextcord
 import youtube_dl
@@ -19,8 +21,97 @@ class AudioEntry:
         self.added_by = message.author
         self.channel = message.channel
         self.message = message
-        self.player = source
+        self.source = source
         self.info = info
+
+    @property
+    def upload_date(self):
+        return self.info.get('uploader', '')
+
+    @property
+    def uploader(self):
+        return self.info.get('uploader', '')
+
+    @property
+    def url(self):
+        return self.source.url
+
+    @property
+    def download_url(self):
+        return self.info.get('download_url', '')
+
+    @property
+    def description(self):
+        return self.info.get('description', '')
+
+    @property
+    def title(self):
+        return self.info.get('title', '')
+
+    @property
+    def duration(self):
+        return self.info.get('duration', '')
+
+    @property
+    def thumbnail(self):
+        return self.info.get('thumbnail', '')
+
+    @property
+    def is_live(self):
+        return self.info.get('is_live', '')
+
+
+class PlayList:
+
+    def __init__(self, voice_client, on_next_song=None):
+        self.deck = asyncio.Queue()
+        self._current_song = None
+        self.voice_client = voice_client
+        self._on_next_song = on_next_song
+
+    async def add_song(self, audio_entry: AudioEntry):
+        if self.deck.empty():
+            self._current_song = audio_entry
+        await self.deck.put(audio_entry)
+
+    async def play(self):
+        if self._current_song and not self.voice_client.is_playing:
+            self.voice_client.resume()
+        else:
+            await self.play_next()
+
+    def pause(self):
+        if self._current_song and self.is_playing:
+            self.voice_client.pause()
+
+    def shuffle(self):
+        if self.deck.qsize() >= 1:
+            shuffle(self.deck._queue)
+            return True
+        return False
+
+    @property
+    def titles(self):
+        return list(self.deck._queue)
+
+    @property
+    def is_playing(self):
+        return self.voice_client.is_playing()
+
+    @property
+    def current_song(self):
+        return self._current_song
+
+    async def play_next(self, paused=False):
+        if self.deck.empty():
+            self._current_song = None
+        next_entry = await self.deck.get()
+        self.voice_client.play(next_entry.source)
+        self._current_song = next_entry
+        if paused:
+            self.pause()
+        if self._on_next_song:
+            await self._on_next_song(next_entry)
 
 
 class AudioState:
@@ -40,7 +131,7 @@ class AudioState:
         if self.voice is None or self.current is None:
             return False
 
-        player = self.current.player
+        player = self.current.source
         return player.is_playing()
 
     async def run_status_update(self, status):
@@ -49,7 +140,7 @@ class AudioState:
 
     @property
     def player(self):
-        return self.current.player
+        return self.current.source
 
     def toggle_next(self, e=None):
         self.client.loop.call_soon_threadsafe(self.play_next_song.set)
@@ -59,7 +150,7 @@ class AudioState:
             self.play_next_song.clear()
             self.current = await self.deck.get()
             await self.run_status_update(AudioStatus.PLAYING)
-            self.current.player.play()
+            self.current.source.play()
             if self.deck.qsize() < 1:
                 await self.queue_next(self.current.message)
             await self.play_next_song.wait()

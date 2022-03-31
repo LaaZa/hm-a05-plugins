@@ -4,7 +4,8 @@ from difflib import SequenceMatcher as SM
 
 import aiohttp
 import nextcord
-import wikia
+import fandom
+import fandom.error
 import wikipedia
 from bs4 import BeautifulSoup
 
@@ -89,28 +90,47 @@ class Plugin(PluginBase):
             subwikia = msg.word(0)
             if len(msg.parts) > 2:
                 keyword = ' '.join(msg.parts[2:])
-                search = wikia.search(subwikia, keyword)
-                best_ratio = 0
-                best_match = ''
-                for result in search:
-                    if keyword.lower() in result.lower():
-                        ratio = SM(None, keyword.lower(), result.lower()).ratio()
-                        if ratio > best_ratio:
-                            best_ratio = ratio
-                            best_match = result
+                search = fandom.search(keyword, subwikia)
+                best_match = tuple()
+                test_disamb = False
+                while True:
+                    best_ratio = 0
+                    best_match = tuple()
+                    ratios = list()
+                    for result in search:
+                        result, i = result
+                        if keyword.lower() in result.lower():
+                            ratio = SM(None, keyword.lower(), result.lower()).ratio()
+                            if ratio > best_ratio and ratio > 0.4:
+                                best_ratio = ratio
+                                best_match = (result, i)
+                                ratios.append(ratio)
+                            r = list(reversed(sorted(ratios)))
+
+                            if len(r) > 1:
+                                if r[0] - r[1] <= 0.2:
+                                    best_match = tuple()
+
+                            #print(f'{result=} {ratio=} {best_ratio=}')
+
+                    if test_disamb and 'may refer to:' in fandom.page(pageid=int(best_match[1]), wiki=subwikia).summary:
+                        search.remove(best_match)
+                        test_disamb = False
+                        continue
+                    break
 
                 try:
-                    redirect_test = wikia.summary(subwikia, keyword)
+                    redirect_test = fandom.summary(keyword, subwikia)
                     if 'REDIRECT' in redirect_test:
                         best_match = redirect_test[9:]
-                except wikia.WikiaError:
+                        #print(f'{best_match=}')
+                except fandom.error.FandomError:
                     pass
-
                 if not best_match:
-                    #raise wikia.DisambiguationError(keyword, search)
+                    #raise fandom.DisambiguationError(keyword, search)
                     options = list()
                     for i, opt in enumerate(search):
-                        options.append(str(i + 1) + '. ' + opt)
+                        options.append(str(i + 1) + '. ' + opt[0])
                     opts = '\n'.join(options)
                     await message.channel.send(f'Try to be more specific. I found these though:\n{self.markdown(opts)}\nType any number above to get that article', delete_after=10)
                     try:
@@ -126,23 +146,23 @@ class Plugin(PluginBase):
                         await message.channel.send('...well maybe it just doesn\'t exist, you suck at searching or I suck at finding... or maybe we just need more bananas.')
                         return True
                     except asyncio.TimeoutError:
-                        pass
+                        return True
 
-                wiki = wikia.page(subwikia, best_match)
+                wiki = fandom.page(pageid=int(best_match[1]), wiki=subwikia)
             else:
                 await message.channel.send('I didn\'t find anything on the Wikia about that. :<')
                 return True
 
             '''
-            text = f'**{wiki.title}**| {wiki.url}\n{wikia.summary(subwikia, wiki.title)}'
+            text = f'**{wiki.title}**| {wiki.url}\n{fandom.summary(subwikia, wiki.title)}'
             text = self.markdown('\n'.join(re.findall(r'^.+\.', wiki.content[:1500], flags=re.M)))
 
             text = f'**{wiki.title}**\n{text}'
             
             if len(text) > 400:
-                text = f'**{wiki.title}**| {wiki.url}\n{wikia.summary(subwikia ,wiki.title)}'
+                text = f'**{wiki.title}**| {wiki.url}\n{fandom.summary(subwikia ,wiki.title)}'
             if len(text) > 400:
-                text = f'**{wiki.title}**| {wiki.url}\n{wikia.summary(subwikia, wiki.title)[:-3]}...'
+                text = f'**{wiki.title}**| {wiki.url}\n{fandom.summary(subwikia, wiki.title)[:-3]}...'
             '''
 
             image = ''
@@ -162,9 +182,9 @@ class Plugin(PluginBase):
 
             Globals.log.debug(f'Image url: {image}')
 
-            text = wiki.content[:2000]
+            text = wiki.plain_text[:2000]
             if not text:
-                text = wikia.summary(subwikia, wiki.title)
+                text = fandom.summary(wiki.title, subwikia)
             paragraph = re.findall(r'^.+\.', text, flags=re.M)
             if not paragraph:
                 paragraph = [text, ]
@@ -182,11 +202,12 @@ class Plugin(PluginBase):
             else:
                 await message.channel.send(message.channel, embed=embed_long)
 
-        except wikia.PageError:
+        except fandom.error.PageError:
             await message.channel.send('I didn\'t find anything on the Wikia about that. :<')
         except ValueError:
             await message.channel.send('I didn\'t find anything on the Wikia about that. :<')
-        except wikia.WikiaError:
+        except fandom.error.FandomError as e:
+            Globals.log.error(f'{e}')
             await message.channel.send('I didn\'t find anything :<')
 
         try:

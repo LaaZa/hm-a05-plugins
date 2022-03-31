@@ -6,20 +6,26 @@ class PlayerView(nextcord.ui.View):
         super().__init__()
         self.musicplayer = musicplayer
 
-    @nextcord.ui.button(label='Play', style=nextcord.ButtonStyle.green)
+    @nextcord.ui.button(label='▶', style=nextcord.ButtonStyle.primary)
     async def play(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
-        await self.musicplayer.subcommands['play'](interaction.message)
-        embed = await self.musicplayer.get_infocard(interaction.message)
-        await interaction.response.edit_message(embed=embed,view=self)
+        if self.musicplayer.has_permission(interaction, 'play'):
+            await self.musicplayer.subcommands['play'](interaction.message)
+            await interaction.response.edit_message(content=f'[{interaction.user.name} pressed play]', view=self)
+        else:
+            await interaction.response.send_message('You don\'t have permissions for that!', ephemeral=True)
 
-    @nextcord.ui.button(label='Pause', style=nextcord.ButtonStyle.red)
+    @nextcord.ui.button(label='❚❚', style=nextcord.ButtonStyle.primary)
     async def pause(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
-        await self.musicplayer.subcommands['pause'](interaction.message)
-        embed = await self.musicplayer.get_infocard(interaction.message)
-        await interaction.response.edit_message(embed=embed, view=self)
+        if self.musicplayer.has_permission(interaction, 'pause'):
+            await self.musicplayer.subcommands['pause'](interaction.message)
+            await interaction.response.edit_message(content=f'[{interaction.user.name} paused]', view=self)
+        else:
+            await interaction.response.send_message('You don\'t have permissions for that!', ephemeral=True)
 
-    @nextcord.ui.button(label='Next', style=nextcord.ButtonStyle.grey)
+    @nextcord.ui.button(label='🞂🞂❙', style=nextcord.ButtonStyle.primary)
     async def next(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
-        await self.musicplayer.subcommands['next'](interaction.message)
-        embed = await self.musicplayer.get_infocard(interaction.message)
-        await interaction.response.edit_message(embed=embed, view=self)
+        if self.musicplayer.has_permission(interaction, 'next'):
+            await self.musicplayer.subcommands['next'](interaction.message)
+            await interaction.response.edit_message(content=f'[{interaction.user.name} skipped]', view=self)
+        else:
+            await interaction.response.send_message('You don\'t have permissions for that!', ephemeral=True)

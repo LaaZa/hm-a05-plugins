@@ -1,4 +1,5 @@
 import asyncio
+import functools
 from enum import Enum
 import inspect
 from random import shuffle
@@ -26,7 +27,8 @@ class AudioEntry:
 
     @property
     def upload_date(self):
-        return self.info.get('uploader', '')
+        date = '.'.join([d for d in (str(self.info.get("upload_day", "")), str(self.info.get("upload_month", "")), str(self.info.get("upload_year", ""))) if d])
+        return f'{date}'
 
     @property
     def uploader(self):
@@ -35,6 +37,10 @@ class AudioEntry:
     @property
     def url(self):
         return self.source.url
+
+    @property
+    def webpage_url(self):
+        return self.info.get('webpage_url', '')
 
     @property
     def download_url(self):
@@ -68,21 +74,40 @@ class PlayList:
         self._current_song = None
         self.voice_client = voice_client
         self._on_next_song = on_next_song
+        self._is_previous_done = False
+        self._status = AudioStatus.STOPPED
 
     async def add_song(self, audio_entry: AudioEntry):
-        if self.deck.empty():
+        if self.deck.empty() and not self._current_song:
             self._current_song = audio_entry
         await self.deck.put(audio_entry)
 
-    async def play(self):
-        if self._current_song and not self.voice_client.is_playing:
+    async def add_next(self, audio_entry: AudioEntry):
+        if self.deck.empty():
+            await self.add_song(audio_entry)
+            return
+        self.deck._queue[0] = audio_entry
+
+
+    async def play(self, start=False):
+        if self.status is AudioStatus.PAUSED:
+            Globals.log.debug(f'resume')
             self.voice_client.resume()
-        else:
+            self.status = AudioStatus.PLAYING
+        elif self.is_previous_done:
+            Globals.log.debug(f'play: play_next')
+            await self.play_next()
+        elif start and self.status is not AudioStatus.PLAYING:
+            Globals.log.debug(f'play: play_next START')
+            self._is_previous_done = True
+            self.status = AudioStatus.PLAYING
             await self.play_next()
 
     def pause(self):
-        if self._current_song and self.is_playing:
+        if self._current_song and self.is_playing and self.status is AudioStatus.PLAYING:
+            Globals.log.debug(f'pause')
             self.voice_client.pause()
+            self.status = AudioStatus.PAUSED
 
     def shuffle(self):
         if self.deck.qsize() >= 1:
@@ -102,16 +127,52 @@ class PlayList:
     def current_song(self):
         return self._current_song
 
-    async def play_next(self, paused=False):
+    @property
+    def is_previous_done(self):
+        return self._is_previous_done
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, audio_status: AudioStatus):
+        self._status = audio_status
+
+    async def wait_loaded(self):
+        while not self.current_song:
+            await asyncio.sleep(1)
+        return True
+
+    async def _after(self, error):
+        if error:
+            Globals.log.error(f'Playback error: {error}')
+        self._is_previous_done = True
+        await self.play_next()
+
+    async def skip(self):
+        Globals.log.debug(f'skip')
+        self.voice_client.stop()
+        await self.play_next()
+
+    async def play_next(self):
         if self.deck.empty():
+            Globals.log.debug(f'play_next: empty')
             self._current_song = None
-        next_entry = await self.deck.get()
-        self.voice_client.play(next_entry.source)
-        self._current_song = next_entry
-        if paused:
-            self.pause()
-        if self._on_next_song:
-            await self._on_next_song(next_entry)
+            return
+        if self.is_previous_done and self.status is not AudioStatus.STOPPED:
+            self.status = AudioStatus.STOPPED
+            Globals.log.debug(f'play_next')
+            next_entry = await self.deck.get()
+            try:
+                self.voice_client.play(await next_entry.source.prepare(), after=self._after)
+                self.status = AudioStatus.PLAYING
+                self._current_song = next_entry
+                self._is_previous_done = False
+            except Exception as e:
+                Globals.log.error(f'Download error: {e}')
+            if self._on_next_song:
+                await self._on_next_song(next_entry)
 
 
 class AudioState:
@@ -232,31 +293,53 @@ class AudioPlayer:
         return self.info.get('is_live', '')
 
 
-class YTDLSource(nextcord.PCMVolumeTransformer):
+class YTDLSource:
     ytdl_format_options = {
         'format': 'bestaudio/best',
-        'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+        'outtmpl': '%(extractor)s-%(id)s.%(ext)s',
         'restrictfilenames': True,
-        'noplaylist': True,
+        'noplaylist': False,
+        'flat-playlist': True,
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'logtostderr': False,
         'quiet': True,
         'no_warnings': True,
         'default_search': 'auto',
-        'extract_flat': True,
-        'source_address': '0.0.0.0'  # ipv6 addresses cause issues sometimes
+        'extract_flat': 'in_playlist',
+        'logger': Globals.log,
+        'source_address': '0.0.0.0'
     }
 
-    ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+    def __init__(self, url):
+        self.ytdl = youtube_dl.YoutubeDL(self.ytdl_format_options)
+        self._url = url
+        self._func = functools.partial(self.ytdl.extract_info, url, download=False)
+        self.data = None
+        self.title = ''
+        self.url = ''
 
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
+    async def load(self, playlist=False):
+        data = await Globals.disco.loop.run_in_executor(None, self._func)
+
+        if playlist:
+            if 'entries' in data:
+                # take first item from a playlist
+                data = data['entries'][0]
 
         self.data = data
 
         self.title = data.get('title')
         self.url = data.get('url')
+        return self
+
+    async def prepare(self):
+        #data = await Globals.disco.loop.run_in_executor(None, self._func)
+        filename = self.data.get('url')  # self.ytdl.prepare_filename(data)
+        #self.ytdl.download()
+        ffmpeg_audio = nextcord.player.FFmpegPCMAudio(filename, before_options='-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', options='-vn')
+        ffmpeg_audio.data = self.data
+        return ffmpeg_audio
 
     @classmethod
     async def from_url(cls, url, *, loop=None):
@@ -269,4 +352,4 @@ class YTDLSource(nextcord.PCMVolumeTransformer):
 
         filename = cls.ytdl.prepare_filename(data)
 
-        return cls(nextcord.FFmpegPCMAudio(filename, before_options='-nostdin', options='-vn'), data=data)
+        return cls(nextcord.player.FFmpegPCMAudio(filename, before_options='-nostdin', options='-vn'), data=data)

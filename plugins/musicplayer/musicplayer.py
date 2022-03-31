@@ -11,7 +11,7 @@ import nextcord
 import youtube_dl
 from nextcord import AudioSource, VoiceClient
 
-from modules.globals import Globals
+from modules.globals import Globals, SavedVar
 from modules.pluginbase import PluginBase
 from plugins.musicplayer.audioplayer import YTDLSource, AudioPlayer, AudioEntry, AudioStatus, PlayList
 from plugins.musicplayer.ui import PlayerView
@@ -74,12 +74,20 @@ class Plugin(PluginBase):
             if subcmd == 'permissions':
                 await self.sub_permissions(message)
             else:
+                if not message.guild.voice_client:  # try to join the user's voice channel if we are not on any
+                    if message.author.voice.channel:
+                        try:
+                            await nextcord.utils.get(message.guild.channels, id=message.author.voice.channel.id).connect()
+                        except Exception as e:
+                            Globals.log.error(f'Could not join channel: {str(e)}')
+                            await message.channel.send('Can\'t join that channel')
+
                 if message.guild.voice_client:
                     if message.guild.id not in self.playlists.keys():
                         self.playlists[message.guild.id] = PlayList(message.guild.voice_client, on_next_song=self.on_next_song)
                     if message.author.voice.channel == message.guild.voice_client.channel:
                         if msg.word(0, default='playing'):
-                            if self._has_permission(message, subcmd):
+                            if self.has_permission(message, subcmd):
                                 await self.subcommands.get(subcmd.lower(), lambda x: True)(message)
                             else:
                                 await message.channel.send(
@@ -123,10 +131,13 @@ class Plugin(PluginBase):
     def get_guild_playlist(self, guild_id):
         return self.playlists.get(guild_id, None)
 
-    def _has_permission(self, message, command):
-        if Globals.permissions.has_permission(message.author,
-                                              Globals.permissions.PermissionLevel.admin) or Globals.permissions.has_discord_permissions(
-                message.author, ('manage_channels',), message.channel):
+    def has_permission(self, message, command):
+        author = None
+        try:
+            author = message.author
+        except AttributeError:
+            author = message.user
+        if Globals.permissions.has_permission(author, Globals.permissions.PermissionLevel.admin) or Globals.permissions.has_discord_permissions(author, ('manage_channels',), message.channel):
             return True
 
         if command == 'playing':
@@ -136,7 +147,7 @@ class Plugin(PluginBase):
             if command in pair:
                 command = pair[0]
 
-        for role in message.author.roles:
+        for role in author.roles:
             if self.role_permissions.get(message.guild.id) and self.role_permissions.get(message.guild.id).get(
                     role.id):
                 for cmds in self.role_permissions.get(message.guild.id).get(role.id):
@@ -186,7 +197,7 @@ class Plugin(PluginBase):
         except TypeError:
             duration = ''
         url = playlist.current_song.url
-        service = urllib.parse.urlsplit(url)[1]
+        service = urllib.parse.urlsplit(playlist.current_song.webpage_url or url)[1]
         uploader = playlist.current_song.uploader
         upload_date = playlist.current_song.upload_date
         added_by = playlist.current_song.added_by
@@ -254,11 +265,11 @@ class Plugin(PluginBase):
             for role in roles:
                 if self.role_permissions.get(message.guild.id) and self.role_permissions.get(message.guild.id).get(
                         role.id):
-                    self.role_permissions[message.guild.id][role.id].update(final_list)
-                    self.role_permissions[message.guild.id][role.id].difference_update(remove_list)
+                    self.role_permissions.x[message.guild.id][role.id].update(final_list)
+                    self.role_permissions.x[message.guild.id][role.id].difference_update(remove_list)
                 else:
-                    self.role_permissions[message.guild.id][role.id] = final_list
-            Globals.log.debug(self.role_permissions)
+                    self.role_permissions.x[message.guild.id][role.id] = final_list
+            Globals.log.debug(self.role_permissions.x)
             await message.channel.send('Changed permissions')
 
         else:
@@ -308,23 +319,38 @@ class Plugin(PluginBase):
             await message.channel.send(f'Not playing anything right now')
         else:
             embed = await self.get_infocard(message.guild.id)
-            self.last_info_card[message.guild] = await message.channel.send(embed=embed)
+            self.last_info_card[message.guild.id] = await message.channel.send(embed=embed)
 
     async def sub_add(self, message):
         msg = self.Command(message)
         if msg.word(1) or message.attachments:
             url = ''
             if message.attachments:
-                url = message.attachments[0]['url']
+                url = message.attachments[0].url
             else:
                 url = msg.words(1)
 
             Globals.log.info(f'Adding url: {url}')
-            source = await YTDLSource.from_url(url)
+            source = YTDLSource(url)
             playlist = self.get_guild_playlist(message.guild.id)
 
+            source_loaded = await source.load()
             media_info = source.data
-            await playlist.add_song(AudioEntry(message, source, media_info))
+            if media_info.get('_type') == 'playlist':
+                await message.channel.send(f'Adding items from playlist...')
+                for entry in media_info.get("entries"):
+                    source_single = YTDLSource(entry.get('url'))
+                    source_loaded_single = await source_single.load(playlist=True)
+                    media_info_single = source_single.data
+                    await playlist.add_song(AudioEntry(message, source_loaded_single, media_info_single))
+                    if not playlist.is_playing:
+                        await playlist.play(True)
+            else:
+                if msg.word(0).lower() in ('addnext', 'an'):
+                    await playlist.add_next(AudioEntry(message, source_loaded, media_info))
+                    media_info['next'] = True
+                else:
+                    await playlist.add_song(AudioEntry(message, source_loaded, media_info))
 
             if media_info:
                 if media_info.get('duration'):
@@ -340,10 +366,10 @@ class Plugin(PluginBase):
                     await message.delete()
 
                 #######
-                embed = await self.get_infocard(message.guild.id)
-                await message.channel.send(embed=embed, view=PlayerView(self))
+                #embed = await self.get_infocard(message.guild.id)
+                #await message.channel.send(embed=embed, )
 
-                await playlist.play()
+                await playlist.play(True)
         else:
             await message.channel.send('I need proper url :/')
 
@@ -357,7 +383,7 @@ class Plugin(PluginBase):
 
     async def sub_next(self, message):
         playlist = self.get_guild_playlist(message.guild.id)
-        playlist.play_next()
+        await playlist.skip()
 
     async def sub_pause(self, message):
         playlist = self.get_guild_playlist(message.guild.id)
@@ -546,6 +572,10 @@ class Plugin(PluginBase):
     #     Globals.log.error('Musicplayer Next')
 
     async def on_next_song(self, audio_entry):
-        pass
-        #playlist = self.get_guild_playlist(channel.guild)
+        embed = await self.get_infocard(audio_entry.channel.guild.id)
+        if audio_entry.channel.guild.id in self.last_info_card.keys():
+            await self.last_info_card[audio_entry.channel.guild.id].edit(embed=embed, view=PlayerView(self))
+        else:
+            self.last_info_card[audio_entry.channel.guild.id] = await audio_entry.channel.send(embed=embed, view=PlayerView(self))
+            await self.last_info_card[audio_entry.channel.guild.id].pin()
         #await playlist.run_status_update(status)

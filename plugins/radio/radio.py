@@ -1,3 +1,4 @@
+import re
 import time
 
 import nextcord
@@ -22,6 +23,12 @@ class Plugin(PluginBase):
         self.last_np = ''
         self.auto_query_list = {'dj': {}, 'np': {}}
         self.last_update = None
+
+        try:
+            Globals.pluginloader.plugins.get('musicplayer').register_metadata_provider(self.RadioMetadataProvider())
+            Globals.log.info(f'registered metadataprovider')
+        except Exception as e:
+            Globals.log.error(f'Could not register metadataprovider: {e}')
 
     async def on_message(self, message, trigger):
         await self.radio.update()
@@ -113,3 +120,52 @@ class Plugin(PluginBase):
             return m.author == Globals.disco.user and m.embeds[0]['title'] == 'R/a/dio' and m.embeds[0]['fields'][0]['name'] in ('New DJ', 'Current DJ')
         except Exception:
             return False
+
+    class RadioMetadataProvider:
+
+        def __init__(self):
+            self.name = 'R/a/dio'
+            self.api = RadioAPI()
+            self._previous_np = ''
+
+        async def metadata_update(self, audio_entry):
+            await self.api.update()
+            audio_entry.info['title'] = self.api.np
+            self._previous_np = self.api.np
+            audio_entry.info['thumbnail'] = self.api.dj_image if not self.api.dj == 'Hanyuu-sama' else 'https://r-a-d.io/assets/logo_image_small.png'
+            audio_entry.info['is_live'] = True
+            audio_entry.info['name'] = f'{self.name} with {self.api.dj}'
+            audio_entry.info['webpange_url'] = 'https://r-a-d.io/'
+            audio_entry.info['colour'] = self.api.dj_color
+            audio_entry.info['extra'] = {
+
+            }
+
+            queue = []
+
+            for i, track in enumerate(self.api.queue):
+                if self.api.queue_is_request(i):
+                    queue.append(f'▢ **{self.api.queue_track(i)} `in {self.api.queue_time(i)}`**')
+                else:
+                    queue.append(f'▢ {self.api.queue_track(i)} `in {self.api.queue_time(i)}`')
+
+            audio_entry.info['extra'].update({
+                '\n\n'.join(queue): ('Coming Up', False)
+            })
+
+        async def on_update(self, fn, *args, **kwargs):
+            Plugin.Jobs.add_interval_task(self, 'RadioMetadataProvider', 10, self.on_update, fn, *args, **kwargs)
+            await self.api.update()
+            if self._previous_np != self.api.np:
+                await self.metadata_update(*args)
+                await fn(*args, **kwargs)
+
+        def hook(self, data):
+            return 'r-a-d.io' in data.info.get('url', '')
+
+        def close(self):
+            Globals.log.debug('Closed')
+            Plugin.Jobs.remove_interval_task(self, 'RadioMetadataProvider')
+
+        def __del__(self):
+            self.close()

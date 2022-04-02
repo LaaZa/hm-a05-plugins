@@ -1,19 +1,15 @@
-import functools
 import re
 import struct
 import urllib.parse
 from collections import defaultdict, deque
 from datetime import timedelta
-from random import shuffle
 
 import aiohttp
 import nextcord
-import youtube_dl
-from nextcord import AudioSource, VoiceClient
 
-from modules.globals import Globals, SavedVar
+from modules.globals import Globals
 from modules.pluginbase import PluginBase
-from plugins.musicplayer.audioplayer import YTDLSource, AudioPlayer, AudioEntry, AudioStatus, PlayList
+from plugins.musicplayer.audioplayer import YTDLSource, AudioEntry, PlayList, MetadataProvider
 from plugins.musicplayer.ui import PlayerView
 
 
@@ -34,6 +30,9 @@ class Plugin(PluginBase):
         [playing][np][EMPTY] to get info card of the currently playing track\n
         '''
         # [volume][vol] to adjust volume of the current track, values can be up,+,down,- to adjust accordingly +-10%'''
+
+        self.metadata_providers = set()
+        self.previous_provider = dict()
 
         self.client = Globals.disco
         self.playlists = {}
@@ -131,12 +130,21 @@ class Plugin(PluginBase):
     def get_guild_playlist(self, guild_id):
         return self.playlists.get(guild_id, None)
 
-    def has_permission(self, message, command):
+    def has_permission(self, message, command, voice_required=False):
         author = None
+
         try:
             author = message.author
         except AttributeError:
             author = message.user
+
+        if voice_required:
+            if message.guild.voice_client:
+                if not author.voice.channel == message.guild.voice_client.channel:
+                    return False
+            else:
+                return False
+
         if Globals.permissions.has_permission(author, Globals.permissions.PermissionLevel.admin) or Globals.permissions.has_discord_permissions(author, ('manage_channels',), message.channel):
             return True
 
@@ -153,31 +161,6 @@ class Plugin(PluginBase):
                 for cmds in self.role_permissions.get(message.guild.id).get(role.id):
                     if command in cmds:
                         return True
-
-    async def get_stream_info(self, url):
-
-        info = {'title': '', 'name': ''}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers={'Icy-MetaData': '1'}) as response:
-                    metaint = int(response.headers['icy-metaint'])
-                    for _ in range(1):
-                        await response.content.read(metaint)
-                        metadata_length = struct.unpack('B', await response.content.read(1))[0] * 16
-                        metadata = await response.content.read(metadata_length)
-                        metadata = metadata.rstrip(b'\0')
-
-                        m = re.search(br"StreamTitle='([^']*)';", metadata)
-                        if m:
-                            title = m.group(1)
-                            if title:
-                                info['title'] = title.decode('latin1')
-                                info['name'] = response.headers['icy-name']
-                                break
-        except Exception:
-            pass
-
-        return info
 
     async def get_infocard(self, guild_id):
         playlist = self.get_guild_playlist(guild_id)
@@ -204,13 +187,19 @@ class Plugin(PluginBase):
         method = 'Streaming' if playlist.current_song.is_live else 'Playing'
 
         info = {
-            title: (f'Currently {method}', False),
+            f'▶ **{title}**': (f'Currently {method} {playlist.current_song.info.get("name", "")}', False),
             duration: ('Duration', False),
             uploader: ('Uploader', True),
             upload_date: ('Upload Date', True),
             added_by.mention: ('Added by', False)
         }
-        embed = nextcord.Embed()
+
+        info.update(playlist.current_song.info.get('extra', ''))
+
+        embed = nextcord.Embed(title='Music Player')
+        if colour := playlist.current_song.info.get('colour', ''):
+            embed.colour = colour
+
         for part, text in info.items():
             if part:
                 embed.add_field(name=text[0], value=part, inline=text[1])
@@ -572,10 +561,33 @@ class Plugin(PluginBase):
     #     Globals.log.error('Musicplayer Next')
 
     async def on_next_song(self, audio_entry):
+        if provider := await self.select_provider(audio_entry):
+            await provider.metadata_update(audio_entry)
+            #self.get_guild_playlist(audio_entry.channel.guild.id).current_song = audio_entry
+            Globals.log.debug(f'{audio_entry.title}')
+            await provider.on_update(self.update_info_card, audio_entry)
+            if self.previous_provider.get(audio_entry.channel.guild.id) and provider is not self.previous_provider.get(audio_entry.channel.guild.id) and provider not in self.previous_provider.values():
+                self.previous_provider.get(audio_entry.channel.guild.id).close()
+            self.previous_provider[audio_entry.channel.guild.id] = provider
+
+        await self.update_info_card(audio_entry)
+
+    async def update_info_card(self, audio_entry):
         embed = await self.get_infocard(audio_entry.channel.guild.id)
         if audio_entry.channel.guild.id in self.last_info_card.keys():
             await self.last_info_card[audio_entry.channel.guild.id].edit(embed=embed, view=PlayerView(self))
         else:
-            self.last_info_card[audio_entry.channel.guild.id] = await audio_entry.channel.send(embed=embed, view=PlayerView(self))
+            self.last_info_card[audio_entry.channel.guild.id] = await audio_entry.channel.send(embed=embed,
+                                                                                               view=PlayerView(self))
             await self.last_info_card[audio_entry.channel.guild.id].pin()
-        #await playlist.run_status_update(status)
+
+    async def select_provider(self, audio_entry):
+        Globals.log.debug(f'MetadataProviders: {self.metadata_providers}')
+        for provider in self.metadata_providers:
+            if provider.hook(audio_entry):
+                return provider
+        return None
+
+    def register_metadata_provider(self, provider: MetadataProvider):
+        self.metadata_providers.add(provider)
+        return True

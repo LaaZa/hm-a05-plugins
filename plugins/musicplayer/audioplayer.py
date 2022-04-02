@@ -1,8 +1,8 @@
 import asyncio
 import functools
 from enum import Enum
-import inspect
 from random import shuffle
+from typing import Protocol, Callable
 
 import nextcord
 import youtube_dl
@@ -27,8 +27,8 @@ class AudioEntry:
 
     @property
     def upload_date(self):
-        date = '.'.join([d for d in (str(self.info.get("upload_day", "")), str(self.info.get("upload_month", "")), str(self.info.get("upload_year", ""))) if d])
-        return f'{date}'
+        #date = '.'.join([d for d in (str(self.info.get("upload_day", "")), str(self.info.get("upload_month", "")), str(self.info.get("upload_year", ""))) if d])
+        return self.info.get('upload_date', '')
 
     @property
     def uploader(self):
@@ -126,6 +126,10 @@ class PlayList:
     @property
     def current_song(self):
         return self._current_song
+
+    @current_song.setter
+    def current_song(self, val: AudioEntry):
+        self._current_song = val
 
     @property
     def is_previous_done(self):
@@ -353,3 +357,20 @@ class YTDLSource:
         filename = cls.ytdl.prepare_filename(data)
 
         return cls(nextcord.player.FFmpegPCMAudio(filename, before_options='-nostdin', options='-vn'), data=data)
+
+
+class MetadataProvider(Protocol):
+
+    name: str
+
+    def hook(self, data) -> bool:
+        ...
+
+    async def on_update(self, fn, *args, **kwargs) -> None:
+        ...
+
+    async def metadata_update(self, audio_entry: AudioEntry) -> None:
+        ...
+
+    def close(self) -> None:
+        ...

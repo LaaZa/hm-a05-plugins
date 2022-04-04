@@ -1,4 +1,3 @@
-import re
 import time
 
 import nextcord
@@ -45,11 +44,8 @@ class Plugin(PluginBase):
             self.last_np = self.radio.np
             if msg.word(1) == 'notify':
                 if self.Jobs.add_interval_task(self, 'np' + str(message.channel.id), 10, self.autoquery, message, 'np'):
-                    #self.auto_query_list['np'].update({message.channel: Globals.disco.loop.create_task(self.autoquery(message, 'np'))})
                     await message.channel.send('I\'ll tell you when the song changes')
                 else:
-                    #Globals.disco.loop.call_soon_threadsafe(self.auto_query_list['np'].get(message.channel).cancel)
-                    #self.auto_query_list['np'].pop(message.channel)
                     self.Jobs.remove_interval_task(self, 'np' + str(message.channel.id))
                     await message.channel.send('Okay, I won\'t be notifying about song changes')
             return True
@@ -61,11 +57,8 @@ class Plugin(PluginBase):
             self.last_dj = self.radio.dj
             if msg.word(1) == 'notify':
                 if self.Jobs.add_interval_task(self, 'dj' + str(message.channel.id), 10, self.autoquery, message, 'dj'):
-                    #self.auto_query_list['np'].update({message.channel: Globals.disco.loop.create_task(self.autoquery(message, 'dj'))})
                     await message.channel.send('I\'ll tell you when the DJ changes')
                 else:
-                    #Globals.disco.loop.call_soon_threadsafe(self.auto_query_list['dj'].get(message.channel).cancel)
-                    #self.auto_query_list['dj'].pop(message.channel)
                     self.Jobs.remove_interval_task(self, 'dj' + str(message.channel.id))
                     await message.channel.send('Okay, I won\'t be notifying about DJ changes')
             return True
@@ -80,10 +73,8 @@ class Plugin(PluginBase):
             for i, track in enumerate(self.radio.queue):
                 if self.radio.queue_is_request(i):
                     embed.add_field(name=self.radio.queue_track(i), value=f'in {self.radio.queue_time(i)}', inline=False)
-                    #text.append(f'**{self.radio.queue_track(i)} in {self.radio.queue_time(i)}**')
                 else:
                     embed.add_field(name=self.radio.queue_track(i), value=f'in {self.radio.queue_time(i)}', inline=False)
-                    #text.append(f'{self.radio.queue_track(i)} in {self.radio.queue_time(i)}')
             await message.channel.send(embed=embed)
             return True
         else:
@@ -135,7 +126,7 @@ class Plugin(PluginBase):
             audio_entry.info['thumbnail'] = self.api.dj_image if not self.api.dj == 'Hanyuu-sama' else 'https://r-a-d.io/assets/logo_image_small.png'
             audio_entry.info['is_live'] = True
             audio_entry.info['name'] = f'{self.name} with {self.api.dj}'
-            audio_entry.info['webpange_url'] = 'https://r-a-d.io/'
+            audio_entry.info['webpage_url'] = 'https://r-a-d.io/'
             audio_entry.info['colour'] = self.api.dj_color
             audio_entry.info['extra'] = {
 

@@ -1,10 +1,7 @@
-import re
-import struct
 import urllib.parse
 from collections import defaultdict, deque
 from datetime import timedelta
 
-import aiohttp
 import nextcord
 
 from modules.globals import Globals
@@ -196,7 +193,7 @@ class Plugin(PluginBase):
 
         info.update(playlist.current_song.info.get('extra', ''))
 
-        embed = nextcord.Embed(title='Music Player')
+        embed = nextcord.Embed(title='Music Player', url=playlist.current_song.webpage_url)
         if colour := playlist.current_song.info.get('colour', ''):
             embed.colour = colour
 
@@ -320,13 +317,18 @@ class Plugin(PluginBase):
                 url = msg.words(1)
 
             Globals.log.info(f'Adding url: {url}')
+            await message.channel.trigger_typing()
             source = YTDLSource(url)
             playlist = self.get_guild_playlist(message.guild.id)
 
             source_loaded = await source.load()
             media_info = source.data
             if media_info.get('_type') == 'playlist':
-                await message.channel.send(f'Adding items from playlist...')
+                if len(media_info.get('entries')) > 1:
+                    await message.channel.send(f'Adding items from playlist...')
+                else:
+                    del media_info['_type']
+                    media_info['title'] = media_info.get('entries')[0].get('title')
                 for entry in media_info.get("entries"):
                     source_single = YTDLSource(entry.get('url'))
                     source_loaded_single = await source_single.load(playlist=True)
@@ -561,14 +563,22 @@ class Plugin(PluginBase):
     #     Globals.log.error('Musicplayer Next')
 
     async def on_next_song(self, audio_entry):
+        provider = None
+        guild_id = audio_entry.channel.guild.id
         if provider := await self.select_provider(audio_entry):
             await provider.metadata_update(audio_entry)
-            #self.get_guild_playlist(audio_entry.channel.guild.id).current_song = audio_entry
             Globals.log.debug(f'{audio_entry.title}')
             await provider.on_update(self.update_info_card, audio_entry)
-            if self.previous_provider.get(audio_entry.channel.guild.id) and provider is not self.previous_provider.get(audio_entry.channel.guild.id) and provider not in self.previous_provider.values():
-                self.previous_provider.get(audio_entry.channel.guild.id).close()
-            self.previous_provider[audio_entry.channel.guild.id] = provider
+            if self.previous_provider.get(guild_id) and provider is not self.previous_provider.get(
+                    guild_id) and provider not in self.previous_provider.values():
+                self.previous_provider.get(guild_id).close()
+                del self.previous_provider[guild_id]
+            self.previous_provider[guild_id] = provider
+
+        # close previous provider if we are not using any
+        if not provider and self.previous_provider.get(guild_id):
+            self.previous_provider.get(guild_id).close()
+            del self.previous_provider[guild_id]
 
         await self.update_info_card(audio_entry)
 

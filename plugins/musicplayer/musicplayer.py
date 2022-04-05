@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import nextcord
 
-from modules.globals import Globals
+from modules.globals import Globals, SavedVar
 from modules.pluginbase import PluginBase
 from plugins.musicplayer.audioplayer import YTDLSource, AudioEntry, PlayList, MetadataProvider
 from plugins.musicplayer.ui import PlayerView
@@ -34,9 +34,15 @@ class Plugin(PluginBase):
         self.client = Globals.disco
         self.playlists = {}
 
-        self.role_permissions = defaultdict(lambda: defaultdict(set))
+        def dds(): return defaultdict(set)
 
-        self.playlist_to_add = defaultdict(deque)
+        self.role_permissions = defaultdict(dds)
+
+        self.saved_role_permissions = SavedVar(self.role_permissions)
+
+        self.role_permissions = +self.saved_role_permissions
+
+        #self.playlist_to_add = defaultdict(deque)
 
         self.last_info_card = {}
 
@@ -251,11 +257,12 @@ class Plugin(PluginBase):
             for role in roles:
                 if self.role_permissions.get(message.guild.id) and self.role_permissions.get(message.guild.id).get(
                         role.id):
-                    self.role_permissions.x[message.guild.id][role.id].update(final_list)
-                    self.role_permissions.x[message.guild.id][role.id].difference_update(remove_list)
+                    self.role_permissions[message.guild.id][role.id].update(final_list)
+                    self.role_permissions[message.guild.id][role.id].difference_update(remove_list)
                 else:
-                    self.role_permissions.x[message.guild.id][role.id] = final_list
-            Globals.log.debug(self.role_permissions.x)
+                    self.role_permissions[message.guild.id][role.id] = final_list
+
+            self.saved_role_permissions <<= self.role_permissions
             await message.channel.send('Changed permissions')
 
         else:

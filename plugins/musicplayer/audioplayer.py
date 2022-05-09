@@ -17,6 +17,7 @@ class AudioStatus(Enum):
 
 
 class AudioEntry:
+    __slots__ = ('added_by', 'channel', 'message', 'source', 'info')
 
     def __init__(self, message, source, info):
         self.added_by = message.author
@@ -27,7 +28,6 @@ class AudioEntry:
 
     @property
     def upload_date(self):
-        #date = '.'.join([d for d in (str(self.info.get("upload_day", "")), str(self.info.get("upload_month", "")), str(self.info.get("upload_year", ""))) if d])
         raw = self.info.get('upload_date', '')
         date = f'{raw[6:8]}.{raw[4:6]}.{raw[:4]}'
         return date
@@ -70,6 +70,8 @@ class AudioEntry:
 
 
 class PlayList:
+
+    __slots__ = ('deck', '_current_song', 'voice_client', '_on_next_song', '_is_previous_done', '_status')
 
     def __init__(self, voice_client, on_next_song=None):
         self.deck = asyncio.Queue()
@@ -181,6 +183,9 @@ class PlayList:
 
 
 class YTDLSource:
+
+    __slots__ = ('ytdl', '_url', '_func', 'data', 'title', 'url')
+
     ytdl_format_options = {
         'format': 'bestaudio/best',
         'outtmpl': '%(extractor)s-%(id)s.%(ext)s',

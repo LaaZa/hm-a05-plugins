@@ -13,7 +13,6 @@ class Plugin(PluginBase):
         super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'Yomomma'
-        t = PluginBase.Trigger()
         self.add_trigger('on_message', 'ym', True, self.on_message)
         self.help = 'A random yomama joke from https://api.yomomma.info/'
 

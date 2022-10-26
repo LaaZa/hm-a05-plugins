@@ -137,4 +137,3 @@ static/
 .defaultconf
 load.order
 plugins/core-*
-/plugins/

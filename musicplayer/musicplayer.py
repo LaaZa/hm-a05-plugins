@@ -6,8 +6,8 @@ import nextcord
 
 from modules.globals import Globals, SavedVar
 from modules.pluginbase import PluginBase
-from plugins.musicplayer.audioplayer import YTDLSource, AudioEntry, PlayList, MetadataProvider
-from plugins.musicplayer.ui import PlayerView
+from musicplayer.audioplayer import YTDLSource, AudioEntry, PlayList, MetadataProvider
+from musicplayer.ui import PlayerView
 
 
 class Plugin(PluginBase):

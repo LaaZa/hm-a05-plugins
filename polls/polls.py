@@ -19,6 +19,7 @@ class Plugin(PluginBase):
         self.name = 'Polls'
         self.add_trigger('on_message', 'poll', True, self.on_message)
         self.add_trigger('on_reaction_add', self.reaction_check, False, self.on_reaction_add)
+        self.add_trigger('on_reaction_remove', self.reaction_check, False, self.on_reaction_remove)
         self.help = 'Make polls'
 
         self.subcommands = {
@@ -27,7 +28,7 @@ class Plugin(PluginBase):
         }
 
         self.polls = defaultdict(lambda: defaultdict(list))
-        self.number_emoji = {1: chr(49)+chr(8419), 2: chr(50)+chr(8419), 3: chr(51)+chr(8419), 4: chr(52)+chr(8419), 5: chr(53)+chr(8419), 6: chr(54)+chr(8419), 7: chr(55)+chr(8419), 8: chr(56)+chr(8419), 9: chr(57)+chr(8419)}
+        self.number_emoji = {1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣', 7: '7️⃣', 8: '8️⃣', 9: '9️⃣'}
 
     async def on_message(self, message, trigger):
         try:
@@ -62,6 +63,16 @@ class Plugin(PluginBase):
                     for k, v in self.number_emoji.items():
                         if v == reaction.emoji:
                             await poll.add_vote(user, k)
+                            return
+
+    async def on_reaction_remove(self, reaction, user, **kwargs):
+        msg = reaction.message
+        if self.polls.get(msg.guild) and self.polls.get(msg.guild).get(msg.channel):
+            for poll in self.polls[msg.guild][msg.channel]:
+                if poll.card.id == msg.id and not poll.ended:
+                    for k, v in self.number_emoji.items():
+                        if v == reaction.emoji:
+                            await poll.remove_vote(user, k)
                             return
 
     async def sub_make(self, message):
@@ -150,7 +161,7 @@ class Plugin(PluginBase):
             self.total_votes = 0
             self.added_by = message.author
             self.votes = {}
-            self.number_emoji = {1: chr(49) + chr(8419), 2: chr(50) + chr(8419), 3: chr(51) + chr(8419), 4: chr(52) + chr(8419), 5: chr(53) + chr(8419), 6: chr(54) + chr(8419), 7: chr(55) + chr(8419), 8: chr(56) + chr(8419), 9: chr(57) + chr(8419)}
+            self.number_emoji = {1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣', 7: '7️⃣', 8: '8️⃣', 9: '9️⃣'}
             self.time = None
             self.pin = False
             self.time_task = None
@@ -171,6 +182,18 @@ class Plugin(PluginBase):
                     self.options.get(str(num))['votes'] += 1
                     self.total_votes += 1
                 self.votes[member] = num
+                await self.update_card()
+            except TypeError:
+                pass
+
+        async def remove_vote(self, member, num):
+            if not self.options.get(str(num)):
+                return
+            try:
+                if self.votes.get(member):
+                    self.options.get(str(self.votes[member]))['votes'] -= 1
+                    #self.options.get(str(num))['votes'] += 1
+                    await self.card.remove_reaction(self.number_emoji[self.votes[member]], member)
                 await self.update_card()
             except TypeError:
                 pass

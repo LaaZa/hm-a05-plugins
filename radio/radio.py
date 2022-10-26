@@ -4,7 +4,7 @@ import nextcord
 
 from modules.globals import Globals
 from modules.pluginbase import PluginBase
-from plugins.radio.radioapi import RadioAPI
+from radio.radioapi import RadioAPI
 
 
 class Plugin(PluginBase):

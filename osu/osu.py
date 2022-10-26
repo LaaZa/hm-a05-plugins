@@ -17,14 +17,22 @@ class Plugin(PluginBase):
 
         self.base_url = 'https://osu.ppy.sh/api/'
 
-        self.api_key = Globals.config_data.get_opt('apikeys', 'osu_key')
+        self.api_key = None
+
+        try:
+            self.api_key = Globals.config_data.get_opt('apikeys', 'osu_key')
+        except KeyError as e:
+            Globals.log.error('no api key')
 
     async def on_message(self, message, trigger):
         msg = self.Command(message)
         try:
             username = msg.words(0) or message.author.display_name
             json = None
+
             params = {'k': self.api_key, 'u': username, 'type': 'string'}
+            if not self.api_key:
+                del params['k']
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.base_url + 'get_user', params=params) as response:
                     json = await response.json()

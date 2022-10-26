@@ -1,6 +1,6 @@
 from modules.globals import Globals
 from modules.pluginbase import PluginBase
-from plugins.wolframalpha.simplewolframapi import SimpleWolframAPI
+from wolframalpha.simplewolframapi import SimpleWolframAPI
 
 
 class Plugin(PluginBase):

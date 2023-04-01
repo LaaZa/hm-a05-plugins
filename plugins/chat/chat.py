@@ -13,6 +13,7 @@ from collections import deque, defaultdict
 from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
 from plugins.chat.summarize import Summarizer
+from plugins.chat.sentiment import Sentiment
 
 
 class Plugin(PluginBase):
@@ -25,6 +26,7 @@ class Plugin(PluginBase):
         self.api_url = 'http://localhost:5000/api/v1/generate' #'https://miharu.free.beeceptor.com'  # Replace with your desired API URL
         self.character_name = 'Miharu'
         self.history_man = self.PromptHistoryManager(self)
+        self.sentiment = Sentiment()
         self.temperature = 0.5
 
         self.messages_since_topic = 0
@@ -40,6 +42,17 @@ class Plugin(PluginBase):
 
         self.scenario = '{{char}} is a bot in a virtual world others are in the real world.'
         self.firstmessage = f'Helloo!! This is {self.character_name}! Your friendly bot friend! Please be kind to me, all this is very new to me!'
+
+        self.emotions = {
+            'joy': 'grin.png',
+            'love': 'pout.png',
+            'anger': 'angry.png',
+            'fear': 'sad.png',
+            'surprise': 'excited.png',
+            'sadness': 'sad.png'
+        }
+
+        self.emo_counter = defaultdict(int)
 
     async def on_message(self, message, trigger):
         if self.first_load:
@@ -70,7 +83,19 @@ class Plugin(PluginBase):
                 Globals.log.debug(f'{tokens=} {self.temperature=}')
 
                 if response:
-                    sent_msg = await message.channel.send(f"{response}")
+                    Globals.log.debug(f'{self.emo_counter[message.channel]}')
+                    emotional = False
+                    if self.emo_counter[message.channel] == 0 and (emo := self.sentiment.emotion(response, 0.99)):
+                        sent_msg = await message.channel.send(file=nextcord.File(BotPath.static / 'small' / self.emotions.get(emo)), content=f"{response}")
+                        self.emo_counter[message.channel] += 1
+                        emotional = True
+                    else:
+                        sent_msg = await message.channel.send(f"{response}")
+                        if self.emo_counter[message.channel] >= 6:
+                            self.emo_counter[message.channel] = 0
+                        elif not emotional and not self.emo_counter[message.channel] == 0:
+                            self.emo_counter[message.channel] += 1
+
                     self.history_man.add_message(self.MessageBlock(sent_msg))
                     self.history_man.save_conversation_history()
                 else:
@@ -215,7 +240,8 @@ class Plugin(PluginBase):
             self.prompt_histories[channel] = new_history
 
         def summary(self, channel):
-            msgs = '\n'.join([mblock.message.content for mblock in itertools.islice(self.get_history(channel), 4)])
+            hist = self.get_history(channel)
+            msgs = '\n'.join([mblock.message.content for mblock in itertools.islice(hist, len(hist)-4, len(hist))])
             self.summarizer.summarize_async(msgs, lambda s: self.set_scenario(channel, s), 20)
 
         def set_scenario(self, channel, scenario):

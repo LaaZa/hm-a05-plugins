@@ -14,6 +14,7 @@ from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
 from plugins.chat.summarize import Summarizer
 from plugins.chat.sentiment import Sentiment
+from transformers import GPT2Tokenizer
 
 
 class Plugin(PluginBase):
@@ -27,6 +28,7 @@ class Plugin(PluginBase):
         self.character_name = 'Miharu'
         self.history_man = self.PromptHistoryManager(self)
         self.sentiment = Sentiment()
+        self.tokenizer = GPT2Tokenizer.from_pretrained('PygmalionAI/pygmalion-6b')
         self.temperature = 0.5
 
         self.messages_since_topic = 0
@@ -79,7 +81,7 @@ class Plugin(PluginBase):
                 self.temperature = self.get_temperature(len(self.history_man.get_history(message.channel)))
                 response = await self.generate_response(prompt)
                 response = self.auto_capitalize_sentences(response)
-                tokens = self.approximate_gpt_token_count(prompt + response)
+                tokens = self.accurate_gpt_token_count(prompt + response)
                 Globals.log.debug(f'{tokens=} {self.temperature=}')
 
                 if response:
@@ -131,7 +133,7 @@ class Plugin(PluginBase):
                 "use_memory": False,
                 "use_authors_note": False,
                 "use_world_info": False,
-                "max_context_length": 1400,
+                "max_context_length": 1500,
                 "max_length": 80,
                 "rep_pen": 1.18,
                 "rep_pen_range": 1024,
@@ -153,14 +155,13 @@ class Plugin(PluginBase):
                     response_data = await resp.json()
                     generated_text = response_data['results'][0]['text']
                     response = generated_text.split(f"{self.character_name}:")[-1].strip()
-                    Globals.log.debug(f'{response}')
                     prune = re.sub(r'^.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
-                    Globals.log.debug(f'{prune}')
-                    return prune or response
+                    cleaned = self.remove_last_incomplete_sentence_gpt(prune or response)
+                    Globals.log.debug(f'{cleaned=}')
+                    return cleaned
                 else:
                     Globals.log.error(f'{resp.status=}')
                     return None
-
 
     def auto_capitalize_sentences(self, text, pattern=re.compile(r'((?<!\.)[!?]\s+|(?<![.])[.]\s+|\(\s*|"\s*|(?<=\s)i(?=\s))(\w)')):
         # Capitalize the first letter of the text
@@ -174,6 +175,33 @@ class Plugin(PluginBase):
     def approximate_gpt_token_count(self, text, pattern=re.compile(r'\w+|[^\w\s]', re.UNICODE)):
         tokens = re.findall(pattern, text)
         return len(tokens)
+
+    def accurate_gpt_token_count(self, text):
+        tokens = self.tokenizer.encode(text)
+        return len(tokens)
+
+    def is_valid_ending(self, token, ending_pattern=re.compile(r'(\.|\?|!)+$|(\*.*\*)$')):
+        if ending_pattern.search(token):
+            return True
+        return False
+
+    def remove_last_incomplete_sentence_gpt(self, text):
+        tokens = self.tokenizer.encode(text, max_length=2048, return_tensors='pt')
+        token_list = tokens.tolist()[0]
+
+        last_boundary_index = None
+        for idx, token in reversed(list(enumerate(token_list))):
+            decoded_token = self.tokenizer.decode(token).strip()
+            if self.is_valid_ending(decoded_token):
+                last_boundary_index = idx
+                break
+
+        if last_boundary_index is not None:
+            truncated_tokens = token_list[:last_boundary_index + 1]
+            truncated_text = self.tokenizer.decode(truncated_tokens)
+            return truncated_text
+
+        return text
 
     def get_temperature(self, context_size):
         # Define the temperature range
@@ -249,7 +277,8 @@ class Plugin(PluginBase):
             self.scenarios[channel] = scenario
 
         def get_scenario(self, channel):
-            return self.scenarios.get(channel, '{{char}} is a bot in a virtual world others are in the real world.')
+            date_string = datetime.datetime.now().strftime('%A, %d. %B %Y %H:%M')
+            return f"Local date and time in 24H: {date_string} | {self.scenarios.get(channel, '{{char}} is a bot in a virtual world others are in the real world.')}"
 
         def save_conversation_history(self, filename='chat.db'):
             try:
@@ -378,3 +407,61 @@ class Plugin(PluginBase):
         @property
         def is_fake(self):
             return self.extra.get('fake', False)
+
+
+class DynamicMemory:
+    def __init__(self, max_messages=5, max_keywords=10):
+        self.max_messages = max_messages
+        self.max_keywords = max_keywords
+        self.keywords = dict()
+
+    def update_memory(self, messages):
+        recent_messages = messages[-self.max_messages:]
+        concatenated_text = " ".join(recent_messages)
+        extracted_keywords = self.extract_keywords(concatenated_text)
+        self.update_keywords_with_subkeywords(extracted_keywords[:self.max_keywords])
+
+    def extract_keywords(self, text):
+        # Implement your keyword extraction method here
+        # For example, using the SpaCy NER approach
+        doc = nlp(text)
+        keywords = [ent.text.lower() for ent in doc.ents]
+        return keywords
+
+    def update_keywords_with_subkeywords(self, new_keywords):
+        for keyword in new_keywords:
+            if keyword not in self.keywords:
+                self.keywords[keyword] = set()
+
+            # Extract subkeywords for the current keyword
+            subkeywords = self.extract_subkeywords(keyword)
+            self.keywords[keyword].update(subkeywords)
+
+    def extract_subkeywords(self, keyword):
+        # Implement your subkeyword extraction method here
+        # It can be based on the main keyword or on other factors
+        subkeywords = []
+        return subkeywords
+
+    def memory_prompt(self):
+        prompt = []
+        for keyword, subkeywords in self.keywords.items():
+            prompt.append(keyword)
+            prompt.extend(subkeywords)
+        return " ".join(prompt)
+
+    def save_to_file(self, file_path):
+        with open(file_path, 'w') as f:
+            json.dump(self.keywords, f)
+
+    @classmethod
+    def load_from_file(cls, file_path, max_messages=5, max_keywords=10):
+        if not os.path.exists(file_path):
+            return cls(max_messages, max_keywords)
+
+        with open(file_path, 'r') as f:
+            keywords = json.load(f)
+
+        instance = cls(max_messages, max_keywords)
+        instance.keywords = {key: set(value) for key, value in keywords.items()}
+        return instance

@@ -35,7 +35,7 @@ class Plugin(PluginBase):
 
         self.first_load = True
 
-        self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
+        self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
         ,personality: carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy
         {{char}} will not strecth names or change them in any way and keep them consistent. {{user}} will always be {{user}}
 
@@ -45,6 +45,7 @@ class Plugin(PluginBase):
         self.scenario = '{{char}} is a bot in a virtual world others are in the real world.'
         self.firstmessage = f'Helloo!! This is {self.character_name}! Your friendly bot friend! Please be kind to me, all this is very new to me!'
 
+        '''
         self.emotions = {
             'joy': 'grin.png',
             'love': 'pout.png',
@@ -53,6 +54,38 @@ class Plugin(PluginBase):
             'surprise': 'excited.png',
             'sadness': 'sad.png'
         }
+        '''
+
+        self.emotions = {
+            'admiration': 'smug.png',
+            'amusement': 'amused.png',
+            'anger': 'angry.png',
+            'annoyance': 'angry.png',
+            'approval': 'grin.png',
+            'caring': 'love.png',
+            'confusion': 'curious.png',
+            'curiosity': 'curious.png',
+            'desire': 'love.png',
+            'disappointment': 'disappointed.png',
+            'disapproval': 'pout.png',
+            'disgust': 'angry.png',
+            'embarrassment': 'nervous.png',
+            'excitement': 'excited.png',
+            'fear': 'fear.png',
+            'gratitude': 'grateful.png',
+            'grief': 'sad.png',
+            'joy': 'excited.png',
+            'love': 'love.png',
+            'nervousness': 'nervous.png',
+            'optimism': 'relief.png',
+            'pride': 'smug.png',
+            'realization': 'surprised.png',
+            'relief': 'relief.png',
+            'remorse': 'sad.png',
+            'sadness': 'sad.png',
+            'surprise': 'surprised.png'
+        }
+
 
         self.emo_counter = defaultdict(int)
 
@@ -87,7 +120,7 @@ class Plugin(PluginBase):
                 if response:
                     Globals.log.debug(f'{self.emo_counter[message.channel]}')
                     emotional = False
-                    if self.emo_counter[message.channel] == 0 and (emo := self.sentiment.emotion(response, 0.99)):
+                    if self.emo_counter[message.channel] == 0 and (emo := self.sentiment.emotion(response, 0.98)):
                         sent_msg = await message.channel.send(file=nextcord.File(BotPath.static / 'small' / self.emotions.get(emo)), content=f"{response}")
                         self.emo_counter[message.channel] += 1
                         emotional = True
@@ -177,7 +210,7 @@ class Plugin(PluginBase):
         return len(tokens)
 
     def accurate_gpt_token_count(self, text):
-        tokens = self.tokenizer.encode(text)
+        tokens = self.tokenizer.encode(text, max_length=2048, truncation=True)
         return len(tokens)
 
     def is_valid_ending(self, token, ending_pattern=re.compile(r'(\.|\?|!)+$|(\*.*\*)$')):
@@ -186,7 +219,7 @@ class Plugin(PluginBase):
         return False
 
     def remove_last_incomplete_sentence_gpt(self, text):
-        tokens = self.tokenizer.encode(text, max_length=2048, return_tensors='pt')
+        tokens = self.tokenizer.encode(text, max_length=2048, return_tensors='pt', truncation=True)
         token_list = tokens.tolist()[0]
 
         last_boundary_index = None
@@ -273,6 +306,7 @@ class Plugin(PluginBase):
             self.summarizer.summarize_async(msgs, lambda s: self.set_scenario(channel, s), 20)
 
         def set_scenario(self, channel, scenario):
+            scenario = self.main.remove_last_incomplete_sentence_gpt(scenario)
             Globals.log.debug(f'{scenario=}')
             self.scenarios[channel] = scenario
 
@@ -409,59 +443,59 @@ class Plugin(PluginBase):
             return self.extra.get('fake', False)
 
 
-class DynamicMemory:
-    def __init__(self, max_messages=5, max_keywords=10):
-        self.max_messages = max_messages
-        self.max_keywords = max_keywords
-        self.keywords = dict()
+    class DynamicMemory:
+        def __init__(self, max_messages=5, max_keywords=10):
+            self.max_messages = max_messages
+            self.max_keywords = max_keywords
+            self.keywords = dict()
 
-    def update_memory(self, messages):
-        recent_messages = messages[-self.max_messages:]
-        concatenated_text = " ".join(recent_messages)
-        extracted_keywords = self.extract_keywords(concatenated_text)
-        self.update_keywords_with_subkeywords(extracted_keywords[:self.max_keywords])
+        def update_memory(self, messages):
+            recent_messages = messages[-self.max_messages:]
+            concatenated_text = " ".join(recent_messages)
+            extracted_keywords = self.extract_keywords(concatenated_text)
+            self.update_keywords_with_subkeywords(extracted_keywords[:self.max_keywords])
 
-    def extract_keywords(self, text):
-        # Implement your keyword extraction method here
-        # For example, using the SpaCy NER approach
-        doc = nlp(text)
-        keywords = [ent.text.lower() for ent in doc.ents]
-        return keywords
+        def extract_keywords(self, text):
+            # Implement your keyword extraction method here
+            # For example, using the SpaCy NER approach
+            doc = nlp(text)
+            keywords = [ent.text.lower() for ent in doc.ents]
+            return keywords
 
-    def update_keywords_with_subkeywords(self, new_keywords):
-        for keyword in new_keywords:
-            if keyword not in self.keywords:
-                self.keywords[keyword] = set()
+        def update_keywords_with_subkeywords(self, new_keywords):
+            for keyword in new_keywords:
+                if keyword not in self.keywords:
+                    self.keywords[keyword] = set()
 
-            # Extract subkeywords for the current keyword
-            subkeywords = self.extract_subkeywords(keyword)
-            self.keywords[keyword].update(subkeywords)
+                # Extract subkeywords for the current keyword
+                subkeywords = self.extract_subkeywords(keyword)
+                self.keywords[keyword].update(subkeywords)
 
-    def extract_subkeywords(self, keyword):
-        # Implement your subkeyword extraction method here
-        # It can be based on the main keyword or on other factors
-        subkeywords = []
-        return subkeywords
+        def extract_subkeywords(self, keyword):
+            # Implement your subkeyword extraction method here
+            # It can be based on the main keyword or on other factors
+            subkeywords = []
+            return subkeywords
 
-    def memory_prompt(self):
-        prompt = []
-        for keyword, subkeywords in self.keywords.items():
-            prompt.append(keyword)
-            prompt.extend(subkeywords)
-        return " ".join(prompt)
+        def memory_prompt(self):
+            prompt = []
+            for keyword, subkeywords in self.keywords.items():
+                prompt.append(keyword)
+                prompt.extend(subkeywords)
+            return " ".join(prompt)
 
-    def save_to_file(self, file_path):
-        with open(file_path, 'w') as f:
-            json.dump(self.keywords, f)
+        def save_to_file(self, file_path):
+            with open(file_path, 'w') as f:
+                json.dump(self.keywords, f)
 
-    @classmethod
-    def load_from_file(cls, file_path, max_messages=5, max_keywords=10):
-        if not os.path.exists(file_path):
-            return cls(max_messages, max_keywords)
+        @classmethod
+        def load_from_file(cls, file_path, max_messages=5, max_keywords=10):
+            if not os.path.exists(file_path):
+                return cls(max_messages, max_keywords)
 
-        with open(file_path, 'r') as f:
-            keywords = json.load(f)
+            with open(file_path, 'r') as f:
+                keywords = json.load(f)
 
-        instance = cls(max_messages, max_keywords)
-        instance.keywords = {key: set(value) for key, value in keywords.items()}
-        return instance
+            instance = cls(max_messages, max_keywords)
+            instance.keywords = {key: set(value) for key, value in keywords.items()}
+            return instance

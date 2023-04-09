@@ -5,6 +5,7 @@ import sqlite3
 import time
 import itertools
 import traceback
+from datetime import timedelta
 
 import nextcord
 import re
@@ -239,7 +240,7 @@ class Plugin(PluginBase):
     def get_temperature(self, context_size):
         # Define the temperature range
         min_temperature = 0.5
-        max_temperature = 0.7
+        max_temperature = 0.67
 
         # Define the context size range for adjusting the temperature
         min_context_size = 2
@@ -257,7 +258,8 @@ class Plugin(PluginBase):
 
     class PromptHistoryManager:
         def __init__(self, main, max_history_length=20):
-            self.prompt_histories = defaultdict(lambda: deque(maxlen=max_history_length))
+            #self.prompt_histories = defaultdict(lambda: deque(maxlen=max_history_length))
+            self.prompt_histories = defaultdict(lambda: list())
             self.main = main
             self.summarizer = Summarizer()
             self.scenarios = dict()
@@ -268,14 +270,18 @@ class Plugin(PluginBase):
         def get_history(self, channel):
             return self.prompt_histories[channel]
 
-        def get_history_prompt(self, channel):
+        def get_history_prompt(self, channel, limit=20, max_age: timedelta = None):
             prompt = ""
             prompt_list = list()
             history = self.get_history(channel)
-            for message in history:
+            for i, message in enumerate(reversed(history)):
+                if i > limit:
+                    break
+                if max_age and datetime.datetime.utcnow() - max_age > message.message.created_at:
+                    continue  # do not get too old messages
                 author = message.message.author.display_name
                 author = author if author != 'HM-A05' else 'Miharu'  # Use the friendly name in prompt
-                prompt_list.append(f"{author}: {str(message)}")
+                prompt_list.insert(0, f"{author}: {str(message)}")
 
             prompt = '\n'.join(prompt_list)
             return prompt
@@ -290,15 +296,17 @@ class Plugin(PluginBase):
             if not self.prompt_histories[channel]:
                 return
 
-            new_history = deque(maxlen=self.prompt_histories[channel].maxlen)
-            for message_data in reversed(self.prompt_histories[channel]):
-                age = max_age + 1
-                age = (datetime.datetime.now(datetime.timezone.utc) - message_data.created_at).total_seconds()
-                if age <= max_age:
-                    new_history.appendleft(message_data)
-                else:
-                    break
-            self.prompt_histories[channel] = new_history
+            return
+
+            #new_history = deque(maxlen=self.prompt_histories[channel].maxlen)
+            #for message_data in reversed(self.prompt_histories[channel]):
+            #    age = max_age + 1
+            #    age = (datetime.datetime.now(datetime.timezone.utc) - message_data.created_at).total_seconds()
+            #    if age <= max_age:
+            #        new_history.appendleft(message_data)
+            #    else:
+            #        break
+            #self.prompt_histories[channel] = new_history
 
         def summary(self, channel):
             hist = self.get_history(channel)
@@ -441,7 +449,6 @@ class Plugin(PluginBase):
         @property
         def is_fake(self):
             return self.extra.get('fake', False)
-
 
     class DynamicMemory:
         def __init__(self, max_messages=5, max_keywords=10):

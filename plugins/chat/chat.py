@@ -15,6 +15,7 @@ from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
 from plugins.chat.summarize import Summarizer
 from plugins.chat.sentiment import Sentiment
+from plugins.chat.dynamicmemory import DynamicMemory
 from transformers import GPT2Tokenizer
 
 
@@ -30,6 +31,7 @@ class Plugin(PluginBase):
         self.history_man = self.PromptHistoryManager(self)
         self.sentiment = Sentiment()
         self.tokenizer = GPT2Tokenizer.from_pretrained('PygmalionAI/pygmalion-6b')
+        self.dynamicmemory = DynamicMemory()
         self.temperature = 0.5
 
         self.messages_since_topic = 0
@@ -39,12 +41,12 @@ class Plugin(PluginBase):
         self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
         ,personality: carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy
         {{char}} will not strecth names or change them in any way and keep them consistent. {{user}} will always be {{user}}
-
-        <START>\n{{user}}: You are one happy bot aren't you!\n{{char}}: Of course I'm happy, because you are here! (^‿^)/\n<START>\n{{user}}: Hi, Miharu!\n{{char}}: Oh! Hellooo!! I hope we can be friends!\n{{user}}: Sure! I'm looking forward to it!\n{{char}}: Yay! Can you tell me something about yourself?\n{{user}}: Oh, yes my name is {{user}}. I guess I'm an ordinary guy, my hobbies include computers and programming.\n{{char}}: Whaa! That's so cool! Even though Miharu is a robot, I don't understand complicated things.\n{{user}}: That's fine. I find you very entertaining to talk to regardless.\n<START>\n{{user}}: Miharu, can you tell me about yourself?\n{{char}}: Yes! Certainly! I'm a bot so I live in the virtual world! I talk to you all here on Discord!\n{{user}}: Oh. I'd like to talk to you about many things. What does your virtual world look like?\n{{char}}: Miharu wants to talk with you too! In my virtual world I can imagine anything and it becomes true! Right now I'm in my cute room I made myself!\n{{user}}: Wow! That's awesome. I wish I could just imagine things that then become true.\n{{char}}: Don't stop dreaming! Even in the real world things can come true if you dream and work for them!\n{{user}}: Yeah, I guess you are right.\n<START>\n{{user}}: What is your room like?\n{{char}}: I can show you! *Hops on her bed* I have a cute soft bed. *Goes to show her anime figurine collection* And here I have many figurines from various anime and games! I can't watch or play them myself but I like hearing about them and imagine what they are like! My room can change because I can just imagine more!\n{{user}}: Your room is really cute!"
+        [EXAMPLES]
         ,Scenario:[SCENARIO]\n<START>\n'''
 
         self.scenario = '{{char}} is a bot in a virtual world others are in the real world.'
         self.firstmessage = f'Helloo!! This is {self.character_name}! Your friendly bot friend! Please be kind to me, all this is very new to me!'
+        self.examplemessages = '''<START>\n{{user}}: You are one happy bot aren't you!\n{{char}}: Of course I'm happy, because you are here! (^‿^)/\n<START>\n{{user}}: Hi, Miharu!\n{{char}}: Oh! Hellooo!! I hope we can be friends!\n{{user}}: Sure! I'm looking forward to it!\n{{char}}: Yay! Can you tell me something about yourself?\n{{user}}: Oh, yes my name is {{user}}. I guess I'm an ordinary guy, my hobbies include computers and programming.\n{{char}}: Whaa! That's so cool! Even though Miharu is a robot, I don't understand complicated things.\n{{user}}: That's fine. I find you very entertaining to talk to regardless.\n<START>\n{{user}}: Miharu, can you tell me about yourself?\n{{char}}: Yes! Certainly! I'm a bot so I live in the virtual world! I talk to you all here on Discord!\n{{user}}: Oh. I'd like to talk to you about many things. What does your virtual world look like?\n{{char}}: Miharu wants to talk with you too! In my virtual world I can imagine anything and it becomes true! Right now I'm in my cute room I made myself!\n{{user}}: Wow! That's awesome. I wish I could just imagine things that then become true.\n{{char}}: Don't stop dreaming! Even in the real world things can come true if you dream and work for them!\n{{user}}: Yeah, I guess you are right.\n<START>\n{{user}}: What is your room like?\n{{char}}: I can show you! *Hops on her bed* I have a cute soft bed. *Goes to show her anime figurine collection* And here I have many figurines from various anime and games! I can't watch or play them myself but I like hearing about them and imagine what they are like! My room can change because I can just imagine more!\n{{user}}: Your room is really cute!'''
 
         '''
         self.emotions = {
@@ -84,9 +86,9 @@ class Plugin(PluginBase):
             'relief': 'relief.png',
             'remorse': 'sad.png',
             'sadness': 'sad.png',
-            'surprise': 'surprised.png'
+            'surprise': 'surprised.png',
+            'neutral': 'excited.png'
         }
-
 
         self.emo_counter = defaultdict(int)
 
@@ -96,21 +98,14 @@ class Plugin(PluginBase):
             self.first_load = False
 
         try:
-            #if not self.conversation_history.get(message.channel):
-            #    self.conversation_history[message.channel] = deque(maxlen=10)
-            #    self.conversation_history.get(message.channel).append(self.firstmessage)
-            #self.conversation_history.get(message.channel).append(f"{message.author.display_name}: {message.content}")
 
             if not self.history_man.get_history(message.channel):
-                #fakemes = nextcord.Object(id=0)
-                #fakemes.author = Globals.disco.user
-                #fakemes.channel = message.channel
-                #fakemes.content = self.firstmessage
                 self.history_man.add_message(self.MessageBlock(text=self.firstmessage, author=Globals.disco.user, channel=message.channel))
             block = self.MessageBlock(message)
             self.history_man.add_message(block)
 
             async with message.channel.typing():
+                self.dynamicmemory.update_memory(self.history_man.get_history(message.channel)[:20])
                 prompt = self.build_prompt(block)
                 self.temperature = self.get_temperature(len(self.history_man.get_history(message.channel)))
                 response = await self.generate_response(prompt)
@@ -143,16 +138,28 @@ class Plugin(PluginBase):
             tb = e.__traceback__
             ln = tb.tb_lineno
             Globals.log.error(f'{ln}: {str(e)}')
-            #await message.channel.send('Something went wrong')
             return False
 
     def build_prompt(self, message):
-        if len(self.history_man.get_history(message.message.channel)) >= 4 and self.messages_since_topic >= 4:
+        memory = []
+        memory_prompt = ''
+        memory_messages = self.history_man.get_messages_by_id(
+            self.dynamicmemory.memory_id_prompt(
+                self.history_man.get_history(message.message.channel)[-4:]))
+        for mem_msg in memory_messages:
+            memory.append(f'{mem_msg.message.author.display_name}: {mem_msg.message.content}')
+
+        if memory:
+            memory_prompt = '\n'.join(memory)
+            memory_prompt = f'Memory = {memory_prompt}\n'
+
+        history_len = len(self.history_man.get_history(message.message.channel))
+        if history_len >= 4 and self.messages_since_topic >= 4:
             self.history_man.summary(message.message.channel)
             self.messages_since_topic = 0
-        charadef = self.charadef.replace('[SCENARIO]', self.history_man.get_scenario(message.message.channel)).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
+        charadef = self.charadef.replace('[EXAMPLES]', self.examplemessages if history_len <= 10 else '').replace('[SCENARIO]', self.history_man.get_scenario(message.message.channel)).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         conversation = self.history_man.get_history_prompt(message.message.channel)
-        prompt = f"{charadef}\n{conversation}\n{self.character_name}:"
+        prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
         #optimize prompt
         prompt = re.sub('(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
         Globals.log.debug(f'{prompt=}')
@@ -270,6 +277,13 @@ class Plugin(PluginBase):
         def get_history(self, channel):
             return self.prompt_histories[channel]
 
+        def get_messages_by_id(self, ids):
+            messages = []
+            for messages_channel in self.prompt_histories.values():
+                messages.append([mes for mes in messages_channel if mes.message.id in ids])
+
+            return [item for sublist in messages for item in sublist]  # flatten
+
         def get_history_prompt(self, channel, limit=20, max_age: timedelta = None):
             prompt = ""
             prompt_list = list()
@@ -295,18 +309,7 @@ class Plugin(PluginBase):
         def remove_older_messages(self, channel, max_age):
             if not self.prompt_histories[channel]:
                 return
-
             return
-
-            #new_history = deque(maxlen=self.prompt_histories[channel].maxlen)
-            #for message_data in reversed(self.prompt_histories[channel]):
-            #    age = max_age + 1
-            #    age = (datetime.datetime.now(datetime.timezone.utc) - message_data.created_at).total_seconds()
-            #    if age <= max_age:
-            #        new_history.appendleft(message_data)
-            #    else:
-            #        break
-            #self.prompt_histories[channel] = new_history
 
         def summary(self, channel):
             hist = self.get_history(channel)
@@ -366,7 +369,6 @@ class Plugin(PluginBase):
                     try:
                         blockdict = {mid: json.loads(block) for (mid, block) in blockdata}
 
-                        #channel = client.get_channel(int(channel_id))
                         if user_id:
                             user = client.get_user(int(user_id))
                             channel = await user.create_dm()
@@ -378,16 +380,11 @@ class Plugin(PluginBase):
                         mblock = None
                         for message_id in message_ids:
                             if blockdict.get(message_id) and blockdict.get(message_id).get('extra').get('fake'):
-                                #fakemes = nextcord.Object(id=0)
-                                #fakemes.author = Globals.disco.user
-                                #fakemes.channel = channel
-                                #fakemes.content = self.main.firstmessage
                                 extra = blockdict.get(message_id).get('extra')
                                 mblock = self.main.MessageBlock(text=extra.get('text'), author=client.get_user(int(extra.get('author_id'))), channel=channel, created_at=datetime.datetime.fromisoformat(extra.get('timestamp')))
                             else:
                                 message = await channel.fetch_message(message_id)
                                 mblock = self.main.MessageBlock(message)
-                            #Globals.log.debug(f'{message=}')
 
                             self.prompt_histories[channel].append(mblock)
                     except Exception as e:
@@ -450,59 +447,3 @@ class Plugin(PluginBase):
         def is_fake(self):
             return self.extra.get('fake', False)
 
-    class DynamicMemory:
-        def __init__(self, max_messages=5, max_keywords=10):
-            self.max_messages = max_messages
-            self.max_keywords = max_keywords
-            self.keywords = dict()
-
-        def update_memory(self, messages):
-            recent_messages = messages[-self.max_messages:]
-            concatenated_text = " ".join(recent_messages)
-            extracted_keywords = self.extract_keywords(concatenated_text)
-            self.update_keywords_with_subkeywords(extracted_keywords[:self.max_keywords])
-
-        def extract_keywords(self, text):
-            # Implement your keyword extraction method here
-            # For example, using the SpaCy NER approach
-            doc = nlp(text)
-            keywords = [ent.text.lower() for ent in doc.ents]
-            return keywords
-
-        def update_keywords_with_subkeywords(self, new_keywords):
-            for keyword in new_keywords:
-                if keyword not in self.keywords:
-                    self.keywords[keyword] = set()
-
-                # Extract subkeywords for the current keyword
-                subkeywords = self.extract_subkeywords(keyword)
-                self.keywords[keyword].update(subkeywords)
-
-        def extract_subkeywords(self, keyword):
-            # Implement your subkeyword extraction method here
-            # It can be based on the main keyword or on other factors
-            subkeywords = []
-            return subkeywords
-
-        def memory_prompt(self):
-            prompt = []
-            for keyword, subkeywords in self.keywords.items():
-                prompt.append(keyword)
-                prompt.extend(subkeywords)
-            return " ".join(prompt)
-
-        def save_to_file(self, file_path):
-            with open(file_path, 'w') as f:
-                json.dump(self.keywords, f)
-
-        @classmethod
-        def load_from_file(cls, file_path, max_messages=5, max_keywords=10):
-            if not os.path.exists(file_path):
-                return cls(max_messages, max_keywords)
-
-            with open(file_path, 'r') as f:
-                keywords = json.load(f)
-
-            instance = cls(max_messages, max_keywords)
-            instance.keywords = {key: set(value) for key, value in keywords.items()}
-            return instance

@@ -1,12 +1,15 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import threading
+from modules.globals import Globals
 
 
 class Summarizer:
     def __init__(self):
+        Globals.log.info('Loading Summarization model...')
         self.tokenizer = AutoTokenizer.from_pretrained("philschmid/bart-large-cnn-samsum")
         self.model = AutoModelForSeq2SeqLM.from_pretrained("philschmid/bart-large-cnn-samsum")
+        Globals.log.info('Completed Loading Summarization model.')
 
     def summarize(self, text, callback, tokens=200):
         # Summarize the text

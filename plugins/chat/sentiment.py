@@ -7,6 +7,7 @@ class Sentiment:
     def __init__(self):
         Globals.log.info('Loading Sentiment analysis model...')
         self.classifier = pipeline("text-classification",model='arpanghoshal/EmoRoBERTa', top_k=1)
+        self.classifier('preload')
         Globals.log.info('Completed Loading Sentiment analysis model.')
 
     def emotion(self, text, limit):

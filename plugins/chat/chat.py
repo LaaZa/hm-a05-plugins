@@ -7,6 +7,7 @@ import itertools
 import traceback
 from datetime import timedelta
 
+import aiosqlite
 import nextcord
 import re
 import aiohttp
@@ -105,7 +106,7 @@ class Plugin(PluginBase):
             self.history_man.add_message(block)
 
             async with message.channel.typing():
-                self.dynamicmemory.update_memory(self.history_man.get_history(message.channel)[:20])
+                self.dynamicmemory.update_memory(self.history_man.get_history(message.channel)[:-20])
                 prompt = self.build_prompt(block)
                 self.temperature = self.get_temperature(len(self.history_man.get_history(message.channel)))
                 response = await self.generate_response(prompt)
@@ -128,7 +129,7 @@ class Plugin(PluginBase):
                             self.emo_counter[message.channel] += 1
 
                     self.history_man.add_message(self.MessageBlock(sent_msg))
-                    self.history_man.save_conversation_history()
+                    await self.history_man.save_conversation_history()
                 else:
                     raise Exception("No response generated")
 
@@ -147,11 +148,13 @@ class Plugin(PluginBase):
             self.dynamicmemory.memory_id_prompt(
                 self.history_man.get_history(message.message.channel)[-4:]))
         for mem_msg in memory_messages:
-            memory.append(f'{mem_msg.message.author.display_name}: {mem_msg.message.content}')
+            author = mem_msg.message.author.display_name
+            author = author if author != 'HM-A05' else 'Miharu'
+            memory.append(f'[{author}: {mem_msg.message.content}]')
 
         if memory:
             memory_prompt = '\n'.join(memory)
-            memory_prompt = f'Memory = {memory_prompt}\n'
+            memory_prompt = f'[{memory_prompt}]\n'
 
         history_len = len(self.history_man.get_history(message.message.channel))
         if history_len >= 4 and self.messages_since_topic >= 4:
@@ -325,55 +328,60 @@ class Plugin(PluginBase):
             date_string = datetime.datetime.now().strftime('%A, %d. %B %Y %H:%M')
             return f"Local date and time in 24H: {date_string} | {self.scenarios.get(channel, '{{char}} is a bot in a virtual world others are in the real world.')}"
 
-        def save_conversation_history(self, filename='chat.db'):
+        async def save_conversation_history(self, filename='chat.db'):
             try:
-                connection = sqlite3.connect(BotPath.plugins / 'chat' / filename, timeout=10)
-                cursor = connection.cursor()
+                async with aiosqlite.connect(BotPath.plugins / 'chat' / filename, timeout=10) as connection:
+                    async with connection.cursor() as cursor:
 
-                cursor.execute("CREATE TABLE IF NOT EXISTS conversation_history (channel_id INT PRIMARY KEY, user_id INT, message_ids TEXT)")
-                cursor.execute("CREATE TABLE IF NOT EXISTS messageblocks (message_id INT PRIMARY KEY, block TEXT)")
+                        await cursor.execute("CREATE TABLE IF NOT EXISTS conversation_history (channel_id INT PRIMARY KEY, user_id INT, message_ids TEXT)")
+                        await cursor.execute("CREATE TABLE IF NOT EXISTS messageblocks (message_id INT PRIMARY KEY, block TEXT)")
 
-                for channel, messageblocks in self.get_histories().items():
-                    message_ids = [message.message.id for message in messageblocks]
-                    user_id = None
-                    if channel.type is nextcord.ChannelType.private:
-                        if channel.recipient:
-                            user_id = channel.recipient.id
-                        else:
-                            user_id = [msg.message.author.id for msg in messageblocks if msg.message.author is not channel.me][0]
-                    cursor.execute("REPLACE INTO conversation_history (channel_id, user_id, message_ids) VALUES (?, ?, ?)", (channel.id, user_id, json.dumps(message_ids)))
-                    for message in messageblocks:
-                        cursor.execute("REPLACE INTO messageblocks (message_id, block) VALUES (?, ?)", (message.message.id, json.dumps(message.data)))
+                        for channel, messageblocks in self.get_histories().items():
+                            message_ids = [message.message.id for message in messageblocks]
+                            user_id = None
+                            if channel.type is nextcord.ChannelType.private:
+                                if channel.recipient:
+                                    user_id = channel.recipient.id
+                                else:
+                                    user_id = [msg.message.author.id for msg in messageblocks if msg.message.author is not channel.me][0]
+                            await cursor.execute("REPLACE INTO conversation_history (channel_id, user_id, message_ids) VALUES (?, ?, ?)", (channel.id, user_id, json.dumps(message_ids)))
+                            for message in messageblocks:
+                                await cursor.execute("REPLACE INTO messageblocks (message_id, block) VALUES (?, ?)", (message.message.id, json.dumps(message.data)))
 
-                connection.commit()
-                connection.close()
+                        await connection.commit()
             except Exception as e:
                 Globals.log.error(str(e))
 
         async def load_conversation_history(self, filename='chat.db'):
             client = Globals.disco
             try:
-                connection = sqlite3.connect(BotPath.plugins / 'chat' / filename, timeout=10)
-                cursor = connection.cursor()
+                async with aiosqlite.connect(BotPath.plugins / 'chat' / filename, timeout=10) as connection:
+                    async with connection.cursor() as cursor:
 
-                cursor.execute("SELECT channel_id, user_id, message_ids FROM conversation_history")
-                data = cursor.fetchall()
+                        await cursor.execute("SELECT channel_id, user_id, message_ids FROM conversation_history")
+                        data = await cursor.fetchall()
 
-                cursor.execute("SELECT message_id, block FROM messageblocks")
-                blockdata = cursor.fetchall()
-
-                connection.close()
+                        await cursor.execute("SELECT message_id, block FROM messageblocks")
+                        blockdata = await cursor.fetchall()
 
                 conversation_history = {}
+                blockdict = {mid: json.loads(block) for (mid, block) in blockdata}
+
+                import timeit
+
+                channel_histories = {}
+
                 for channel_id, user_id, message_ids_data in data:
                     try:
-                        blockdict = {mid: json.loads(block) for (mid, block) in blockdata}
-
                         if user_id:
                             user = client.get_user(int(user_id))
-                            channel = await user.create_dm()
+                            channel = user.dm_channel or await user.create_dm()
                         else:
                             channel = nextcord.utils.get(client.get_all_channels(), id=int(channel_id))
+
+                        if channel not in channel_histories.keys():
+                            channel_histories[channel] = await channel.history(limit=500).flatten()
+
                         messages = []
                         message_ids = json.loads(message_ids_data)
                         message = None
@@ -383,7 +391,10 @@ class Plugin(PluginBase):
                                 extra = blockdict.get(message_id).get('extra')
                                 mblock = self.main.MessageBlock(text=extra.get('text'), author=client.get_user(int(extra.get('author_id'))), channel=channel, created_at=datetime.datetime.fromisoformat(extra.get('timestamp')))
                             else:
-                                message = await channel.fetch_message(message_id)
+                                try:
+                                    message = [m for m in channel_histories[channel] if m.id == message_id][0]
+                                except IndexError:
+                                    pass
                                 mblock = self.main.MessageBlock(message)
 
                             self.prompt_histories[channel].append(mblock)

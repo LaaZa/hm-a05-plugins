@@ -1,8 +1,15 @@
-from annoy import AnnoyIndex
+import sqlite3
+import atexit
+
+import hnswlib
+from dataclasses import dataclass, field
+from collections import namedtuple
 from sentence_transformers import SentenceTransformer
-from modules.globals import Globals
+from modules.globals import Globals, BotPath
 import nltk
 import numpy as np
+
+Membed = namedtuple("Membed", ["embedding", "message_id", "global_id"])
 
 
 class DynamicMemory:
@@ -10,9 +17,12 @@ class DynamicMemory:
         Globals.log.info(f'Loading Dynamic Memory...')
         nltk.download('punkt')
         self.max_messages = max_messages
-        self.membeddings = list()
-        self._model = SentenceTransformer('randypang/intent-simple-chat')
-        self._annoyin = AnnoyIndex(768, "angular")
+        #self._model = SentenceTransformer('randypang/intent-simple-chat')
+        #self._model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        self._model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        self._model.encode(['preload'])
+        self._index = self.MemoryIndex.create(dim=768)
+        self._index.load()
         Globals.log.info(f'Completed Loading Dynamic Memory.')
 
     def _segment_text(self, text):
@@ -25,27 +35,30 @@ class DynamicMemory:
             return
         return self._model.encode(sentences, convert_to_numpy=True)
 
-    def _build_annoy_index(self):
-        self._annoyin = AnnoyIndex(768, "angular")
-        for i, (embedding, _) in enumerate(self.membeddings):
-            self._annoyin.add_item(i, embedding)
-        self._annoyin.build(10)
-
     def update_memory(self, messages):
-        updated = False
+        Globals.log.debug(f'update_memory called with {len(messages)} messages')
+
+        processed = skipped = 0
+
         for messageblock in messages:
-            #if messageblock.message.id in [mem[1] for mem in self.membeddings]:
-            #    continue  # skip if already embedded
-            #Globals.log.debug(f'Updating memory with message: {messageblock.message.id}')
+            #Globals.log.debug(f'Processing message: {messageblock.message.id}')
+            processed += 1
+
+            if messageblock.message.id in [mem.message_id for mem in self._index.membeddings]:
+                #Globals.log.debug(f'Skipping already embedded message: {messageblock.message.id}')
+                skipped += 1
+                continue  # skip if already embedded
+
             embeddings = self._embed(messageblock.message.content)
             if embeddings is None or not len(embeddings):
+                #Globals.log.debug(f'Skipping message with no embeddings: {messageblock.message.id}')
+                skipped += 1
                 continue
-            for embedding in embeddings:
-                self.membeddings.append((embedding, messageblock.message.id))
-                updated = True
 
-            if updated:
-                self._build_annoy_index()
+            for embedding in embeddings:
+                self._index.add_item(embedding, messageblock.message.id)
+
+        Globals.log.debug(f'Messages processed: {processed} | skipped: {skipped}')
 
     def memory_id_prompt(self, messages):
         query_embeddings = []
@@ -57,34 +70,135 @@ class DynamicMemory:
 
         num_neighbors = 5
 
-        similarity_threshold = 0.7
+        similarity_threshold = 0.55
 
         output = []
 
         for query_embeddings_per_msg in query_embeddings:
             for query_embedding in query_embeddings_per_msg:
 
-                nearest_neighbors, distances = self._annoyin.get_nns_by_vector(query_embedding, num_neighbors, include_distances=True)
-                Globals.log.debug(f'{nearest_neighbors} {distances} - {query_embedding=}')
-                #  convert to cosine similarity 0 - 1.0
-                similarity_scores = [1 - dist / 2 for dist in distances]
+                membeds = self._index.search(query_embedding, num_neighbors, similarity_threshold)
 
-                filtered_results = [(idx, sim) for idx, sim in zip(nearest_neighbors, similarity_scores) if sim >= similarity_threshold]
-
-                sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
-
-                for idx, sim in sorted_results:
-                    Globals.log.debug(f"Index: {idx}, Similarity: {sim}")
-
-                    output.append(self._annoyin.get_item_vector(idx))
+                for membed in membeds:
+                    output.append(membed)
 
         message_ids = set()
 
-        for emb in output:
-            for embed, m_id in self.membeddings:
-                if np.array_equal(emb, embed):
-                    message_ids.add(m_id)
+        for membed in output:
+            message_ids.add(membed.message_id)
 
         Globals.log.debug(f'{message_ids=}')
 
         return message_ids
+
+    @dataclass
+    class MemoryIndex:
+        membeddings: list
+        index: any
+        next_global_id: int = field(default=0)
+
+        def __post_init__(self):
+            self.memorymanager = self.MemoryManager()
+            atexit.register(self.memorymanager.close)
+
+        @classmethod
+        def create(cls, dim=768, ef=100):
+            mem_index = hnswlib.Index(space='cosine', dim=dim)
+            mem_index.init_index(max_elements=100000, ef_construction=200, M=16)
+            mem_index.set_ef(ef)
+            return cls(membeddings=[], index=mem_index)
+
+        def load(self):
+            membeds = self.memorymanager.load_embeddings()
+            for membed in membeds:
+                self.add_item(membed.embedding, membed.message_id, membed.global_id, True)
+
+            # Update next_global_id to be the maximum global_id + 1
+            if self.membeddings:
+                self.next_global_id = max(membed.global_id for membed in self.membeddings) + 1
+
+        def add_item(self, embedding, message_id, global_id=None, suppress=False):
+            gid = global_id or self.next_global_id
+            if message_id in [mem.message_id for mem in self.membeddings]:
+                return
+            if gid < self.index.get_max_elements():
+                if not suppress:
+                    Globals.log.debug(f'Updating memory with message: mem_id:{gid} mes_id:{message_id}')
+                membed = Membed(embedding, message_id, gid)
+                self.membeddings.append(membed)
+                self.index.add_items(embedding, gid)
+                if global_id is None:
+                    self.memorymanager.save_embedding(membed)
+                if global_id is None:
+                    self.next_global_id += 1
+            else:
+                Globals.log.error(f'MemoryIndex is FULL')
+
+        def _get_by_gid(self, gid):
+            for membed in self.membeddings:
+                if membed.global_id == gid:
+                    return membed
+
+        def search(self, query_embedding, num_neighbors, similarity_threshold):
+
+            nearest_neighbors, distances = self.index.knn_query(query_embedding, k=num_neighbors)
+            nearest_neighbors = nearest_neighbors[0]  # Flatten the nearest_neighbors list
+            distances = distances[0]  # Flatten the distances list
+
+            filtered_results = [(idx, sim) for idx, sim in zip(nearest_neighbors, distances) if sim >= similarity_threshold]
+
+            sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
+
+            membeds = []
+
+            for idx, sim in sorted_results:
+                membeds.append(self._get_by_gid(idx))
+
+            return membeds
+
+        class MemoryManager:
+            def __init__(self):
+                self.conn = sqlite3.connect(BotPath.plugins / 'chat' / 'memory.db')
+                self.create_table()
+
+            def create_table(self):
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS embeddings (
+                        global_id INTEGER PRIMARY KEY,
+                        message_id INTEGER,
+                        embedding BLOB
+                    )
+                """)
+                self.conn.commit()
+
+            def save_embedding(self, membed):
+                cursor = self.conn.cursor()
+                # Convert numpy array to binary
+                embedding_blob = membed.embedding.tobytes()
+
+                cursor.execute("""
+                    INSERT INTO embeddings (global_id, message_id, embedding)
+                    VALUES (?, ?, ?)
+                """, (membed.global_id, membed.message_id, embedding_blob))
+
+                self.conn.commit()
+
+            def load_embeddings(self):
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT * FROM embeddings")
+
+                embeddings_data = []
+                for row in cursor.fetchall():
+                    global_id, message_id, embedding_blob = row
+                    # Convert binary to numpy array
+                    embedding = np.frombuffer(embedding_blob, dtype=np.float32)
+                    embedding_data = Membed(embedding, message_id, global_id)
+                    embeddings_data.append(embedding_data)
+
+                Globals.log.debug(f'Loaded memory: {len(embeddings_data)}')
+
+                return embeddings_data
+
+            def close(self):
+                self.conn.close()

@@ -2,6 +2,7 @@ import sqlite3
 import atexit
 
 import hnswlib
+import blosc2
 from dataclasses import dataclass, field
 from collections import namedtuple
 from sentence_transformers import SentenceTransformer
@@ -145,9 +146,11 @@ class DynamicMemory:
             nearest_neighbors = nearest_neighbors[0]  # Flatten the nearest_neighbors list
             distances = distances[0]  # Flatten the distances list
 
-            filtered_results = [(idx, sim) for idx, sim in zip(nearest_neighbors, distances) if sim >= similarity_threshold]
+            filtered_results = [(idx, 1 - sim) for idx, sim in zip(nearest_neighbors, distances) if 1 - sim >= similarity_threshold]
 
             sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
+
+            Globals.log.debug(f'{sorted_results=}')
 
             membeds = []
 
@@ -176,6 +179,7 @@ class DynamicMemory:
                 cursor = self.conn.cursor()
                 # Convert numpy array to binary
                 embedding_blob = membed.embedding.tobytes()
+                embedding_blob = blosc2.compress(embedding_blob)
 
                 cursor.execute("""
                     INSERT INTO embeddings (global_id, message_id, embedding)
@@ -191,6 +195,7 @@ class DynamicMemory:
                 embeddings_data = []
                 for row in cursor.fetchall():
                     global_id, message_id, embedding_blob = row
+                    embedding_blob = blosc2.decompress(embedding_blob)
                     # Convert binary to numpy array
                     embedding = np.frombuffer(embedding_blob, dtype=np.float32)
                     embedding_data = Membed(embedding, message_id, global_id)

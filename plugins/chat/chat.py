@@ -1,11 +1,10 @@
 import datetime
 import json
-import os
-import sqlite3
 import time
 import itertools
 import traceback
-from datetime import timedelta
+from datetime import timedelta, timezone
+import humanize
 
 import aiosqlite
 import nextcord
@@ -16,6 +15,7 @@ from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
 from plugins.chat.summarize import Summarizer
 from plugins.chat.sentiment import Sentiment
+from plugins.chat.caption import Caption
 from plugins.chat.dynamicmemory import DynamicMemory
 from transformers import GPT2Tokenizer
 
@@ -27,17 +27,25 @@ class Plugin(PluginBase):
         self.name = 'ChatBot'
         self.add_trigger('on_message', re.compile('.+'), False, self.on_message)
         self.help = 'Acts as a chatbot, generating dialogue with context'
-        self.api_url = 'http://localhost:5000/api/v1/generate' #'https://miharu.free.beeceptor.com'  # Replace with your desired API URL
+        self.api_url = 'http://localhost:5000/api/v1/generate'
         self.character_name = 'Miharu'
         self.history_man = self.PromptHistoryManager(self)
         self.sentiment = Sentiment()
+        self.captioner = Caption()
         self.tokenizer = GPT2Tokenizer.from_pretrained('PygmalionAI/pygmalion-6b')
         self.dynamicmemory = DynamicMemory()
         self.temperature = 0.5
-
+        self.kobold = False
         self.messages_since_topic = 0
-
         self.first_load = True
+
+        # load custom config
+        try:
+            self.api_url = Globals.config_data.get_opt('chat', 'apiurl')
+            self.kobold = Globals.config_data.get_opt('chat', 'apikobold')
+        except KeyError as e:
+            Globals.log.error('using default config for chat')
+
 
         self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
         ,personality: carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy
@@ -103,6 +111,28 @@ class Plugin(PluginBase):
             if not self.history_man.get_history(message.channel):
                 self.history_man.add_message(self.MessageBlock(text=self.firstmessage, author=Globals.disco.user, channel=message.channel))
             block = self.MessageBlock(message)
+            try:
+                if len(self.history_man.get_history(message.channel)) > 1 and (last_mes_time := self.history_man.get_history(message.channel)[-2].message.created_at):
+                    if datetime.datetime.now(timezone.utc) >= last_mes_time + datetime.timedelta(hours=1):
+                        block.prepend = f"*{humanize.naturaltime(last_mes_time, when=datetime.datetime.now(timezone.utc)).replace('ago', 'has passed since previous message')}*"
+            except Exception as e:
+                Globals.log.debug(f'Tried to add time {e}')
+
+            # caption images if found
+            if message.attachments:
+                appends = []
+                images = []
+                for attachment in message.attachments:
+                    if attachment.content_type.startswith("image/"):
+                        images.append(attachment.url)
+                if images:
+                    captions = await self.captioner.caption(images)
+                    for caption in captions:
+                        if caption:
+                            appends.append(f'image that shows {caption}')
+                if appends:
+                    block.append = f'*Sent an {" and another ".join(appends)}*'
+
             self.history_man.add_message(block)
 
             async with message.channel.typing():
@@ -117,7 +147,7 @@ class Plugin(PluginBase):
                 if response:
                     Globals.log.debug(f'{self.emo_counter[message.channel]}')
                     emotional = False
-                    if self.emo_counter[message.channel] == 0 and (emo := self.sentiment.emotion(response, 0.98)):
+                    if self.emo_counter[message.channel] == 0 and (emo := await self.sentiment.emotion(response, 0.98)):
                         sent_msg = await message.channel.send(file=nextcord.File(BotPath.static / 'small' / self.emotions.get(emo)), content=f"{response}")
                         self.emo_counter[message.channel] += 1
                         emotional = True
@@ -133,28 +163,45 @@ class Plugin(PluginBase):
                 else:
                     raise Exception("No response generated")
 
-                return True
+            return True
         except Exception as e:
-            Globals.log.error(f'ChatBot error: {str(e)}')
-            tb = e.__traceback__
-            ln = tb.tb_lineno
-            Globals.log.error(f'{ln}: {str(e)}')
+            #Globals.log.error(f'ChatBot error: {str(e)}')
+            #tb = e.__traceback__
+            #ln = tb.tb_lineno
+            #Globals.log.error(f'{ln}: {str(e)}')
+            Globals.log.error(''.join(traceback.format_exception(None, e, e.__traceback__)))
             return False
 
     def build_prompt(self, message):
         memory = []
         memory_prompt = ''
-        memory_messages = self.history_man.get_messages_by_id(
-            self.dynamicmemory.memory_id_prompt(
-                self.history_man.get_history(message.message.channel)[-4:]))
+        memory_messages = []
+        #memory_messages = self.history_man.get_messages_by_id(
+        #self.dynamicmemory.memory_id_prompt(
+        #self.history_man.get_history(message.message.channel)[-4:]))
+
+        mes_list = self.dynamicmemory.memory_id_prompt(self.history_man.get_history(message.message.channel)[-4:])
+        for mes in mes_list:
+            memory_messages.append(self.history_man.get_history_slice_by_id(mes, 3))
+
         for mem_msg in memory_messages:
-            author = mem_msg.message.author.display_name
-            author = author if author != 'HM-A05' else 'Miharu'
-            memory.append(f'[{author}: {mem_msg.message.content}]')
+            if isinstance(mem_msg, list):
+                hist = []
+                for message in mem_msg:
+                    author = message.message.author.display_name
+                    author = author if author != 'HM-A05' else 'Miharu'
+                    hist.append(f'{author}: {message.message.content}')
+                if hist:
+                    hist = "\n".join(hist)
+                    memory.append(f'<START>{hist}')
+            else:
+                author = mem_msg.message.author.display_name
+                author = author if author != 'HM-A05' else 'Miharu'
+                memory.append(f'<START>{author}: {mem_msg.message.content}')
 
         if memory:
             memory_prompt = '\n'.join(memory)
-            memory_prompt = f'[{memory_prompt}]\n'
+            memory_prompt = f'{memory_prompt}'
 
         history_len = len(self.history_man.get_history(message.message.channel))
         if history_len >= 4 and self.messages_since_topic >= 4:
@@ -162,7 +209,8 @@ class Plugin(PluginBase):
             self.messages_since_topic = 0
         charadef = self.charadef.replace('[EXAMPLES]', self.examplemessages if history_len <= 10 else '').replace('[SCENARIO]', self.history_man.get_scenario(message.message.channel)).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         conversation = self.history_man.get_history_prompt(message.message.channel)
-        prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
+        #prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
+        prompt = f"{charadef}\nOld Conversation=[{memory_prompt}]\n\n<START>{conversation}\n{self.character_name}:"
         #optimize prompt
         prompt = re.sub('(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
         Globals.log.debug(f'{prompt=}')
@@ -171,29 +219,45 @@ class Plugin(PluginBase):
 
     async def generate_response(self, prompt):
         async with aiohttp.ClientSession() as session:
-            payload = {
-                "prompt": prompt,
-                "use_story": False,
-                "use_memory": False,
-                "use_authors_note": False,
-                "use_world_info": False,
-                "max_context_length": 1500,
-                "max_length": 80,
-                "rep_pen": 1.18,
-                "rep_pen_range": 1024,
-                "rep_pen_slope": 0.9,
-                "temperature": self.temperature,
-                "tfs": 0.9,
-                "top_a": 0,
-                "top_k": 0,
-                "top_p": 0.9,
-                "typical": 1,
-                "sampler_order": [
-                    6, 0, 1, 2,
-                    3, 4, 5
-                ],
-                "singleline": True
-            }
+            payload = {}
+            if self.kobold:
+                payload = {
+                    'prompt': prompt,
+                    'use_story': False,
+                    'use_memory': False,
+                    'use_authors_note': False,
+                    'use_world_info': False,
+                    'max_context_length': 1500,
+                    'max_length': 80,
+                    'rep_pen': 1.18,
+                    'rep_pen_range': 1024,
+                    'rep_pen_slope': 0.9,
+                    'temperature': self.temperature,
+                    'tfs': 0.9,
+                    'top_a': 0,
+                    'top_k': 0,
+                    'top_p': 0.9,
+                    'typical': 1,
+                    'sampler_order': [
+                        6, 0, 1, 2,
+                        3, 4, 5
+                    ],
+                    'singleline': True
+                }
+            else:
+                payload = {
+                    'prompt': prompt,
+                    'do_sample': True,
+                    'truncation_length': 1500,
+                    'max_new_tokens': 80,
+                    'repetition_penalty': 1.18,
+                    'temperature': self.temperature,
+                    'top_a': 0,
+                    'top_k': 0,
+                    'top_p': 0.9,
+                    'typical_p': 1,
+                    'custom_stopping_strings': ['\n']
+                }
             async with session.post(self.api_url, json=payload) as resp:
                 if resp.status == 200:
                     response_data = await resp.json()
@@ -202,12 +266,17 @@ class Plugin(PluginBase):
                     prune = re.sub(r'^.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
                     cleaned = self.remove_last_incomplete_sentence_gpt(prune or response)
                     Globals.log.debug(f'{cleaned=}')
+                    if cleaned != response:
+                        Globals.log.debug(f'Original {response=}')
                     return cleaned
                 else:
                     Globals.log.error(f'{resp.status=}')
                     return None
 
     def auto_capitalize_sentences(self, text, pattern=re.compile(r'((?<!\.)[!?]\s+|(?<![.])[.]\s+|\(\s*|"\s*|(?<=\s)i(?=\s))(\w)')):
+
+        if not text:
+            return ''
         # Capitalize the first letter of the text
         text = text[0].upper() + text[1:]
 
@@ -286,6 +355,28 @@ class Plugin(PluginBase):
                 messages.append([mes for mes in messages_channel if mes.message.id in ids])
 
             return [item for sublist in messages for item in sublist]  # flatten
+
+        def get_history_slice_by_id(self, message_id, slice_size=3):
+            center_idx = None
+            channel = None
+            for messages_channel in self.prompt_histories.values():
+                try:
+                    idx, message = [(idx, mes.message) for idx, mes in enumerate(messages_channel) if mes.message.id == message_id][0]
+                    center_idx = idx
+                    channel = message.channel
+                    break
+                except IndexError:
+                    continue
+            if not channel:
+                return []
+
+            lst = self.get_history(channel)
+            half_slice_size = slice_size // 2
+            start_idx = max(center_idx - half_slice_size, 0)
+            end_idx = min(center_idx + half_slice_size + 1, len(lst))
+            start_idx = max(len(lst) - slice_size, 0) if end_idx == len(lst) else start_idx
+            end_idx = min(slice_size, len(lst)) if start_idx == 0 else end_idx
+            return lst[start_idx:end_idx]
 
         def get_history_prompt(self, channel, limit=20, max_age: timedelta = None):
             prompt = ""
@@ -457,4 +548,4 @@ class Plugin(PluginBase):
         @property
         def is_fake(self):
             return self.extra.get('fake', False)
-
+        

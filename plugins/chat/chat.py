@@ -25,7 +25,7 @@ class Plugin(PluginBase):
         super().__init__()
         self.type = PluginBase.PluginType.UNCORE
         self.name = 'ChatBot'
-        self.add_trigger('on_message', re.compile('.+'), False, self.on_message)
+        self.add_trigger('on_message', re.compile('.*'), False, self.on_message)
         self.help = 'Acts as a chatbot, generating dialogue with context'
         self.api_url = 'http://localhost:5000/api/v1/generate'
         self.character_name = 'Miharu'
@@ -187,10 +187,10 @@ class Plugin(PluginBase):
         for mem_msg in memory_messages:
             if isinstance(mem_msg, list):
                 hist = []
-                for message in mem_msg:
-                    author = message.message.author.display_name
+                for msg in mem_msg:
+                    author = msg.message.author.display_name
                     author = author if author != 'HM-A05' else 'Miharu'
-                    hist.append(f'{author}: {message.message.content}')
+                    hist.append(f'{author}: {msg.message.content}')
                 if hist:
                     hist = "\n".join(hist)
                     memory.append(f'<START>{hist}')
@@ -210,7 +210,12 @@ class Plugin(PluginBase):
         charadef = self.charadef.replace('[EXAMPLES]', self.examplemessages if history_len <= 10 else '').replace('[SCENARIO]', self.history_man.get_scenario(message.message.channel)).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         conversation = self.history_man.get_history_prompt(message.message.channel)
         #prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
-        prompt = f"{charadef}\nOld Conversation=[{memory_prompt}]\n\n<START>{conversation}\n{self.character_name}:"
+        prompt = ''
+        if memory_prompt:
+            #prompt = f"{charadef}\nThis reminds you of these events from your past: [{memory_prompt}]\n\n<START>{conversation}\n{self.character_name}:"\
+            prompt = f"This reminds you of these events from your past: [{memory_prompt}]\n\n{charadef}\n\n{conversation}\n{self.character_name}:"
+        else:
+            prompt = f"{charadef}\n\n{conversation}\n{self.character_name}:"
         #optimize prompt
         prompt = re.sub('(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
         Globals.log.debug(f'{prompt=}')
@@ -263,7 +268,7 @@ class Plugin(PluginBase):
                     response_data = await resp.json()
                     generated_text = response_data['results'][0]['text']
                     response = generated_text.split(f"{self.character_name}:")[-1].strip()
-                    prune = re.sub(r'^.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
+                    prune = re.sub(r'\n.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
                     cleaned = self.remove_last_incomplete_sentence_gpt(prune or response)
                     Globals.log.debug(f'{cleaned=}')
                     if cleaned != response:
@@ -480,15 +485,17 @@ class Plugin(PluginBase):
                         for message_id in message_ids:
                             if blockdict.get(message_id) and blockdict.get(message_id).get('extra').get('fake'):
                                 extra = blockdict.get(message_id).get('extra')
+                                #Globals.log.debug(f'{extra}')
                                 mblock = self.main.MessageBlock(text=extra.get('text'), author=client.get_user(int(extra.get('author_id'))), channel=channel, created_at=datetime.datetime.fromisoformat(extra.get('timestamp')))
                             else:
                                 try:
                                     message = [m for m in channel_histories[channel] if m.id == message_id][0]
                                 except IndexError:
                                     pass
-                                mblock = self.main.MessageBlock(message)
-
-                            self.prompt_histories[channel].append(mblock)
+                                if message:
+                                    mblock = self.main.MessageBlock(message)
+                            if mblock:
+                                self.prompt_histories[channel].append(mblock)
                     except Exception as e:
                         tb = e.__traceback__
                         ln = tb.tb_lineno
@@ -512,10 +519,10 @@ class Plugin(PluginBase):
                     fakemes.content = text
                     self.message = fakemes
                     self.extra['fake'] = True
-                    self.extra['timestamp'] = created_at or fakemes.created_at
+                    self.extra['timestamp'] = created_at or datetime.datetime.utcnow()
                     self.extra['timestamp'] = self.extra['timestamp'].isoformat()
                     self.extra['text'] = text
-                    self.extra['author_id'] = author.id
+                    self.extra['author_id'] = author.id if author else Globals.disco.user.id
                     self.extra['channel_id'] = channel.id
                 except Exception as e:
                     tb = e.__traceback__

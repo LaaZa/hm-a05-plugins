@@ -71,22 +71,24 @@ class DynamicMemory:
 
         num_neighbors = 5
 
-        similarity_threshold = 0.55
+        similarity_threshold = 0.65
 
         output = []
 
         for query_embeddings_per_msg in query_embeddings:
             for query_embedding in query_embeddings_per_msg:
 
-                membeds = self._index.search(query_embedding, num_neighbors, similarity_threshold)
+                membeds, similarities = self._index.search(query_embedding, num_neighbors, similarity_threshold, True)
 
-                for membed in membeds:
-                    output.append(membed)
+                for i, sim in enumerate(similarities):
+                    output.append((sim, membeds[i]))
 
-        message_ids = set()
+        message_ids = dict()
 
-        for membed in output:
-            message_ids.add(membed.message_id)
+        for sim, membed in sorted(output, reverse=True):
+            message_ids.update({membed.message_id: sim})
+
+        message_ids = [mid for mid in message_ids.keys()][:4]
 
         Globals.log.debug(f'{message_ids=}')
 
@@ -140,7 +142,7 @@ class DynamicMemory:
                 if membed.global_id == gid:
                     return membed
 
-        def search(self, query_embedding, num_neighbors, similarity_threshold):
+        def search(self, query_embedding, num_neighbors, similarity_threshold, return_sim=False):
 
             nearest_neighbors, distances = self.index.knn_query(query_embedding, k=num_neighbors)
             nearest_neighbors = nearest_neighbors[0]  # Flatten the nearest_neighbors list
@@ -153,10 +155,14 @@ class DynamicMemory:
             Globals.log.debug(f'{sorted_results=}')
 
             membeds = []
+            similarity = []
 
             for idx, sim in sorted_results:
                 membeds.append(self._get_by_gid(idx))
+                similarity.append(sim)
 
+            if return_sim:
+                return membeds, similarity
             return membeds
 
         class MemoryManager:

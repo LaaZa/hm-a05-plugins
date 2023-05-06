@@ -10,7 +10,7 @@ import aiosqlite
 import nextcord
 import re
 import aiohttp
-from collections import deque, defaultdict
+from collections import defaultdict
 from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
 from plugins.chat.summarize import Summarizer
@@ -45,7 +45,6 @@ class Plugin(PluginBase):
             self.kobold = Globals.config_data.get_opt('chat', 'apikobold')
         except KeyError as e:
             Globals.log.error('using default config for chat')
-
 
         self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
         ,personality: carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy
@@ -141,7 +140,7 @@ class Plugin(PluginBase):
                 self.temperature = self.get_temperature(len(self.history_man.get_history(message.channel)))
                 response = await self.generate_response(prompt)
                 response = self.auto_capitalize_sentences(response)
-                tokens = self.accurate_gpt_token_count(prompt + response)
+                tokens = await self.api_token_count(prompt + response)
                 Globals.log.debug(f'{tokens=} {self.temperature=}')
 
                 if response:
@@ -217,7 +216,7 @@ class Plugin(PluginBase):
         else:
             prompt = f"{charadef}\n\n{conversation}\n{self.character_name}:"
         #optimize prompt
-        prompt = re.sub('(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
+        prompt = re.sub(r'(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
         Globals.log.debug(f'{prompt=}')
         self.messages_since_topic += 1
         return prompt
@@ -253,16 +252,25 @@ class Plugin(PluginBase):
                 payload = {
                     'prompt': prompt,
                     'do_sample': True,
-                    'truncation_length': 1500,
+                    'truncation_length': 2048,
                     'max_new_tokens': 80,
                     'repetition_penalty': 1.18,
                     'temperature': self.temperature,
-                    'top_a': 0,
-                    'top_k': 0,
                     'top_p': 0.9,
                     'typical_p': 1,
-                    'custom_stopping_strings': ['\n']
+                    'min_length': 0,
+                    'no_repeat_ngram_size': 0,
+                    'num_beams': 1,
+                    'penalty_alpha': 0,
+                    'length_penalty': 1,
+                    'early_stopping': False,
+                    'seed': -1,
+                    'add_bos_token': True,
+                    'ban_eos_token': False,
+                    'skip_special_tokens': True,
+                    'stopping_strings': ['\n']
                 }
+
             async with session.post(self.api_url, json=payload) as resp:
                 if resp.status == 200:
                     response_data = await resp.json()
@@ -279,7 +287,6 @@ class Plugin(PluginBase):
                     return None
 
     def auto_capitalize_sentences(self, text, pattern=re.compile(r'((?<!\.)[!?]\s+|(?<![.])[.]\s+|\(\s*|"\s*|(?<=\s)i(?=\s))(\w)')):
-
         if not text:
             return ''
         # Capitalize the first letter of the text
@@ -298,7 +305,22 @@ class Plugin(PluginBase):
         tokens = self.tokenizer.encode(text, max_length=2048, truncation=True)
         return len(tokens)
 
-    def is_valid_ending(self, token, ending_pattern=re.compile(r'(\.|\?|!)+$|(\*.*\*)$')):
+    async def api_token_count(self, text):
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                'prompt': text
+            }
+
+            async with session.post(self.api_url.replace('generate', 'token-count'), json=payload) as resp:
+                if resp.status == 200:
+                    response_data = await resp.json()
+                    tokens = response_data['results'][0]['tokens']
+                    return tokens
+                else:
+                    Globals.log.error(f'{resp.status=}')
+                    return self.approximate_gpt_token_count(text)
+
+    def is_valid_ending(self, token, ending_pattern=re.compile(r'([.?!])+$|(\*.*\*)$')):
         if ending_pattern.search(token):
             return True
         return False

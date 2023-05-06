@@ -1,4 +1,4 @@
-from transformers import pipeline, AutoTokenizer, BlipProcessor, BlipForConditionalGeneration
+from transformers import pipeline, BlipProcessor, BlipForConditionalGeneration
 import torch
 from functools import partial
 from modules.globals import Globals
@@ -14,7 +14,7 @@ class Caption:
         model = BlipForConditionalGeneration.from_pretrained(model_url)
 
         # Set the model to FP16 and move it to the GPU
-        self.captioner = pipeline('image-to-text', model=model, tokenizer=processor, image_processor=processor, device=0, framework='pt', torch_dtype=torch.float16, max_new_tokens=50)
+        self.captioner = pipeline('image-to-text', model=model, tokenizer=processor, image_processor=processor, device='cpu', framework='pt', max_new_tokens=50)
         Globals.log.info('Completed Loading Image captioning model.')
 
     async def caption(self, image):

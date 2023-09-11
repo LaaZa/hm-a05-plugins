@@ -17,7 +17,7 @@ from plugins.chat.summarize import Summarizer
 from plugins.chat.sentiment import Sentiment
 from plugins.chat.caption import Caption
 from plugins.chat.dynamicmemory import DynamicMemory
-from transformers import GPT2Tokenizer
+from transformers import LlamaTokenizer
 
 
 class Plugin(PluginBase):
@@ -27,15 +27,15 @@ class Plugin(PluginBase):
         self.name = 'ChatBot'
         self.add_trigger('on_message', re.compile('.*'), False, self.on_message)
         self.help = 'Acts as a chatbot, generating dialogue with context'
-        self.api_url = 'http://localhost:5000/api/v1/generate'
+        self.api_url = 'http://localhost:5001/api/v1/generate'
         self.character_name = 'Miharu'
         self.history_man = self.PromptHistoryManager(self)
         self.sentiment = Sentiment()
         self.captioner = Caption()
-        self.tokenizer = GPT2Tokenizer.from_pretrained('PygmalionAI/pygmalion-6b')
+        self.tokenizer = LlamaTokenizer.from_pretrained('PygmalionAI/pygmalion-2-13b')
         self.dynamicmemory = DynamicMemory()
         self.temperature = 0.5
-        self.kobold = False
+        self.kobold = True
         self.messages_since_topic = 0
         self.first_load = True
 
@@ -46,11 +46,13 @@ class Plugin(PluginBase):
         except KeyError as e:
             Globals.log.error('using default config for chat')
 
-        self.charadef = '''{{char}}'s Persona: [character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "Pet male gerbil called Null who has white fur and red eyes")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]
-        ,personality: carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy
-        {{char}} will not strecth names or change them in any way and keep them consistent. {{user}} will always be {{user}}
-        [EXAMPLES]
-        ,Scenario:[SCENARIO]\n<START>\n'''
+        self.prompt_format = '{{system}}\n{{chardef}}\n{{personality}}\n{{scenario}}\n'
+
+        self.system_mes = f"<|system|>Enter RP mode. You shall reply to {{user}} while staying in character. Your responses must be detailed, creative, immersive, and drive the scenario forward. You will follow {self.character_name}'s persona."
+
+        self.charadef = '''[character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "3 pet male gerbils called Lux, Pax and Nux, located in the real world")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]'''
+
+        self.personality = "carefree, clumsy, energetic, food lover, friendly, funny, nature lover, outgoing, puffy"
 
         self.scenario = '{{char}} is a bot in a virtual world others are in the real world.'
         self.firstmessage = f'Helloo!! This is {self.character_name}! Your friendly bot friend! Please be kind to me, all this is very new to me!'
@@ -58,6 +60,7 @@ class Plugin(PluginBase):
 
         '''
         self.emotions = {
+        
             'joy': 'grin.png',
             'love': 'pout.png',
             'anger': 'angry.png',
@@ -140,7 +143,7 @@ class Plugin(PluginBase):
                 self.temperature = self.get_temperature(len(self.history_man.get_history(message.channel)))
                 response = await self.generate_response(prompt)
                 response = self.auto_capitalize_sentences(response)
-                tokens = await self.api_token_count(prompt + response)
+                tokens = self.accurate_gpt_token_count(prompt + response) #await self.api_token_count(prompt + response)
                 Globals.log.debug(f'{tokens=} {self.temperature=}')
 
                 if response:
@@ -189,32 +192,34 @@ class Plugin(PluginBase):
                 for msg in mem_msg:
                     author = msg.message.author.display_name
                     author = author if author != 'HM-A05' else 'Miharu'
-                    hist.append(f'{author}: {msg.message.content}')
+                    hist.append(f'{"<|model|>" if author == "Miharu" else "<|user|>"}{author}: {msg.message.content}')
                 if hist:
-                    hist = "\n".join(hist)
+                    hist = "".join(hist)
                     memory.append(f'<START>{hist}')
             else:
                 author = mem_msg.message.author.display_name
                 author = author if author != 'HM-A05' else 'Miharu'
-                memory.append(f'<START>{author}: {mem_msg.message.content}')
+                memory.append(f'<START>{"<|model|>" if author == "Miharu" else "<|user|>"}{author}: {mem_msg.message.content}')
 
         if memory:
-            memory_prompt = '\n'.join(memory)
-            memory_prompt = f'{memory_prompt}'
+            memory_prompt = ''.join(memory)
+            memory_prompt = f'This reminds you of these events from your past: [{memory_prompt}]'
 
         history_len = len(self.history_man.get_history(message.message.channel))
         if history_len >= 4 and self.messages_since_topic >= 4:
             self.history_man.summary(message.message.channel)
             self.messages_since_topic = 0
-        charadef = self.charadef.replace('[EXAMPLES]', self.examplemessages if history_len <= 10 else '').replace('[SCENARIO]', self.history_man.get_scenario(message.message.channel)).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
+        #charadef = self.charadef
+        scenario = self.history_man.get_scenario(message.message.channel).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         conversation = self.history_man.get_history_prompt(message.message.channel)
         #prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
         prompt = ''
         if memory_prompt:
             #prompt = f"{charadef}\nThis reminds you of these events from your past: [{memory_prompt}]\n\n<START>{conversation}\n{self.character_name}:"\
-            prompt = f"This reminds you of these events from your past: [{memory_prompt}]\n\n{charadef}\n\n{conversation}\n{self.character_name}:"
+            #prompt = f"This reminds you of these events from your past: [{memory_prompt}]\n\n{charadef}\n\n{conversation}\n{self.character_name}:"
+            prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n[{memory_prompt}]\n{conversation}<|model|>{self.character_name}:'
         else:
-            prompt = f"{charadef}\n\n{conversation}\n{self.character_name}:"
+            prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n{conversation}<|model|>{self.character_name}:'
         #optimize prompt
         prompt = re.sub(r'(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
         Globals.log.debug(f'{prompt=}')
@@ -231,22 +236,31 @@ class Plugin(PluginBase):
                     'use_memory': False,
                     'use_authors_note': False,
                     'use_world_info': False,
-                    'max_context_length': 1500,
+                    'max_context_length': 4096,
                     'max_length': 80,
-                    'rep_pen': 1.18,
-                    'rep_pen_range': 1024,
-                    'rep_pen_slope': 0.9,
+                    'rep_pen': 1.1,
+                    'rep_pen_range': 2048,
+                    'rep_pen_slope': 0.2,
                     'temperature': self.temperature,
-                    'tfs': 0.9,
+                    'tfs': 1,
                     'top_a': 0,
                     'top_k': 0,
-                    'top_p': 0.9,
+                    'top_p': 0.73,
                     'typical': 1,
                     'sampler_order': [
-                        6, 0, 1, 2,
-                        3, 4, 5
+                        6, 0, 1, 3,
+                        4, 2, 5
                     ],
-                    'singleline': True
+                    'singleline': True,
+                    'stop_sequence': [
+                        '<|user|>',
+                        '<|model|>',
+                        '<|user',
+                        '<',
+                        '<|',
+                        '|',
+                        '\n'
+                    ]
                 }
             else:
                 payload = {
@@ -276,8 +290,9 @@ class Plugin(PluginBase):
                     response_data = await resp.json()
                     generated_text = response_data['results'][0]['text']
                     response = generated_text.split(f"{self.character_name}:")[-1].strip()
-                    prune = re.sub(r'\n.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
-                    cleaned = self.remove_last_incomplete_sentence_gpt(prune or response)
+                    #prune = re.sub(r'\n.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
+                    cleaned = self.remove_last_incomplete_sentence_gpt(response)
+                    #cleaned = response
                     Globals.log.debug(f'{cleaned=}')
                     if cleaned != response:
                         Globals.log.debug(f'Original {response=}')
@@ -326,7 +341,7 @@ class Plugin(PluginBase):
         return False
 
     def remove_last_incomplete_sentence_gpt(self, text):
-        tokens = self.tokenizer.encode(text, max_length=2048, return_tensors='pt', truncation=True)
+        tokens = self.tokenizer.encode(text, max_length=4096, return_tensors='pt', truncation=True)
         token_list = tokens.tolist()[0]
 
         last_boundary_index = None
@@ -334,19 +349,21 @@ class Plugin(PluginBase):
             decoded_token = self.tokenizer.decode(token).strip()
             if self.is_valid_ending(decoded_token):
                 last_boundary_index = idx
+                Globals.log.debug(f'{idx=} {token_list=}')
                 break
 
         if last_boundary_index is not None:
             truncated_tokens = token_list[:last_boundary_index + 1]
             truncated_text = self.tokenizer.decode(truncated_tokens)
+            truncated_text = truncated_text.replace('<s>', '')
             return truncated_text
 
         return text
 
     def get_temperature(self, context_size):
         # Define the temperature range
-        min_temperature = 0.5
-        max_temperature = 0.67
+        min_temperature = 0.67
+        max_temperature = 0.72
 
         # Define the context size range for adjusting the temperature
         min_context_size = 2
@@ -416,9 +433,9 @@ class Plugin(PluginBase):
                     continue  # do not get too old messages
                 author = message.message.author.display_name
                 author = author if author != 'HM-A05' else 'Miharu'  # Use the friendly name in prompt
-                prompt_list.insert(0, f"{author}: {str(message)}")
+                prompt_list.insert(0, f"{'<|model|>' if author == 'Miharu' else '<|user|>'}{author}: {str(message)}")
 
-            prompt = '\n'.join(prompt_list)
+            prompt = ''.join(prompt_list)
             return prompt
 
         def get_histories(self):

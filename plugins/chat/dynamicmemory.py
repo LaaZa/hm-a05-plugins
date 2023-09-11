@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 from modules.globals import Globals, BotPath
 import nltk
 import numpy as np
+import random
 
 Membed = namedtuple("Membed", ["embedding", "message_id", "global_id"])
 
@@ -81,16 +82,21 @@ class DynamicMemory:
                 membeds, similarities = self._index.search(query_embedding, num_neighbors, similarity_threshold, True)
 
                 for i, sim in enumerate(similarities):
-                    output.append((sim, membeds[i]))
+                    output.append((sim + (random.randint(0, 10) / 100000000), membeds[i]))
 
         message_ids = dict()
 
-        for sim, membed in sorted(output, reverse=True):
-            message_ids.update({membed.message_id: sim})
+        try:
 
-        message_ids = [mid for mid in message_ids.keys()][:4]
+            for sim, membed in sorted(output, reverse=True):
+                message_ids.update({membed.message_id: sim})
 
-        Globals.log.debug(f'{message_ids=}')
+            message_ids = [mid for mid in message_ids.keys()][:4]
+
+            Globals.log.debug(f'{message_ids=}')
+        except ValueError:
+            Globals.log.debug(f'Weird happened, memory skipped.')
+            return dict()
 
         return message_ids
 

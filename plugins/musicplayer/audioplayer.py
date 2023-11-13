@@ -5,7 +5,7 @@ from random import shuffle
 from typing import Protocol
 
 import nextcord
-import youtube_dl
+import yt_dlp as youtube_dl
 
 from modules.globals import Globals
 

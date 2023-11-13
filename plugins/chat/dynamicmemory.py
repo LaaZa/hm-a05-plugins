@@ -150,7 +150,7 @@ class DynamicMemory:
 
         def search(self, query_embedding, num_neighbors, similarity_threshold, return_sim=False):
 
-            nearest_neighbors, distances = self.index.knn_query(query_embedding, k=num_neighbors)
+            nearest_neighbors, distances = self.index.knn_query(query_embedding, k=min(num_neighbors, self.index.get_current_count()))
             nearest_neighbors = nearest_neighbors[0]  # Flatten the nearest_neighbors list
             distances = distances[0]  # Flatten the distances list
 

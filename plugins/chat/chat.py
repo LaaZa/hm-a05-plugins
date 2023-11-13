@@ -191,15 +191,15 @@ class Plugin(PluginBase):
                 hist = []
                 for msg in mem_msg:
                     author = msg.message.author.display_name
-                    author = author if author != 'HM-A05' else 'Miharu'
-                    hist.append(f'{"<|model|>" if author == "Miharu" else "<|user|>"}{author}: {msg.message.content}')
+                    author = author if author != Globals.disco.user.name else self.character_name
+                    hist.append(f'{"<|model|>" if author == self.character_name else "<|user|>"}{author}: {msg.message.content}')
                 if hist:
                     hist = "".join(hist)
                     memory.append(f'<START>{hist}')
             else:
                 author = mem_msg.message.author.display_name
-                author = author if author != 'HM-A05' else 'Miharu'
-                memory.append(f'<START>{"<|model|>" if author == "Miharu" else "<|user|>"}{author}: {mem_msg.message.content}')
+                author = author if author != Globals.disco.user.name else self.character_name
+                memory.append(f'<START>{"<|model|>" if author == self.character_name else "<|user|>"}{author}: {mem_msg.message.content}')
 
         if memory:
             memory_prompt = ''.join(memory)
@@ -317,7 +317,7 @@ class Plugin(PluginBase):
         return len(tokens)
 
     def accurate_gpt_token_count(self, text):
-        tokens = self.tokenizer.encode(text, max_length=2048, truncation=True)
+        tokens = self.tokenizer.encode(text, max_length=4096, truncation=True)
         return len(tokens)
 
     async def api_token_count(self, text):
@@ -432,8 +432,8 @@ class Plugin(PluginBase):
                 if max_age and datetime.datetime.utcnow() - max_age > message.message.created_at:
                     continue  # do not get too old messages
                 author = message.message.author.display_name
-                author = author if author != 'HM-A05' else 'Miharu'  # Use the friendly name in prompt
-                prompt_list.insert(0, f"{'<|model|>' if author == 'Miharu' else '<|user|>'}{author}: {str(message)}")
+                author = author if author != Globals.disco.user.name else self.character_name  # Use the friendly name in prompt
+                prompt_list.insert(0, f"{'<|model|>' if author == self.character_name else '<|user|>'}{author}: {str(message)}")
 
             prompt = ''.join(prompt_list)
             return prompt

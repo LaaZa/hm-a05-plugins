@@ -1,4 +1,5 @@
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer
+from optimum.onnxruntime import ORTModelForSequenceClassification
 from modules.globals import Globals
 
 
@@ -6,7 +7,14 @@ class Sentiment:
 
     def __init__(self):
         Globals.log.info('Loading Sentiment analysis model...')
-        self.classifier = pipeline("text-classification", model='arpanghoshal/EmoRoBERTa', top_k=1)
+        model_id = "SamLowe/roberta-base-go_emotions-onnx"
+        file_name = "onnx/model_quantized.onnx"
+
+
+        model = ORTModelForSequenceClassification.from_pretrained(model_id, file_name=file_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+        self.classifier = pipeline("text-classification", model=model, tokenizer=tokenizer, top_k=1)
         self.classifier('preload')
         Globals.log.info('Completed Loading Sentiment analysis model.')
 

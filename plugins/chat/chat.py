@@ -152,7 +152,7 @@ class Plugin(PluginBase):
                 if response:
                     Globals.log.debug(f'{self.emo_counter[message.channel]}')
                     emotional = False
-                    if self.emo_counter[message.channel] == 0 and (emo := await self.sentiment.emotion(response, 0.98)):
+                    if self.emo_counter[message.channel] == 0 and (emo := await self.sentiment.emotion(response, 0.95)):
                         sent_msg = await message.channel.send(file=nextcord.File(BotPath.static / 'small' / self.emotions.get(emo)), content=f"{response}")
                         self.emo_counter[message.channel] += 1
                         emotional = True

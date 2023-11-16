@@ -135,6 +135,9 @@ class Plugin(PluginBase):
                 if appends:
                     block.append = f'*Sent an {" and another ".join(appends)}*'
 
+                if not images:
+                    return False
+
             self.history_man.add_message(block)
 
             async with message.channel.typing():
@@ -432,8 +435,8 @@ class Plugin(PluginBase):
                 if max_age and datetime.datetime.utcnow() - max_age > message.message.created_at:
                     continue  # do not get too old messages
                 author = message.message.author.display_name
-                author = author if author != Globals.disco.user.name else self.character_name  # Use the friendly name in prompt
-                prompt_list.insert(0, f"{'<|model|>' if author == self.character_name else '<|user|>'}{author}: {str(message)}")
+                author = author if author != Globals.disco.user.name else self.main.character_name  # Use the friendly name in prompt
+                prompt_list.insert(0, f"{'<|model|>' if author == self.main.character_name else '<|user|>'}{author}: {str(message)}")
 
             prompt = ''.join(prompt_list)
             return prompt

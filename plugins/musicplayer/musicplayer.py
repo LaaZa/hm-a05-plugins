@@ -75,6 +75,7 @@ class Plugin(PluginBase):
             subcmd = msg.word(0, default='playing')
             if subcmd == 'permissions':
                 await self.sub_permissions(message)
+                return True
             else:
                 if not message.guild.voice_client:  # try to join the user's voice channel if we are not on any
                     if message.author.voice.channel:
@@ -83,7 +84,7 @@ class Plugin(PluginBase):
                         except Exception as e:
                             Globals.log.error(f'Could not join channel: {str(e)}')
                             await message.channel.send('Can\'t join that channel')
-
+                            return True
                 if message.guild.voice_client:
                     if message.guild.id not in self.playlists.keys():
                         self.playlists[message.guild.id] = PlayList(message.guild.voice_client, on_next_song=self.on_next_song)
@@ -99,8 +100,10 @@ class Plugin(PluginBase):
                         return False
                 else:
                     await message.channel.send('I\'m not on a voice channel')
+                    return True
         else:
             await message.channel.send('I can\'t play musicplayer here')
+            return True
 
     '''
     UTILITY FUNCTIONS
@@ -316,60 +319,64 @@ class Plugin(PluginBase):
 
     async def sub_add(self, message):
         msg = self.Command(message)
-        if msg.word(1) or message.attachments:
-            url = ''
-            if message.attachments:
-                url = message.attachments[0].url
+        try:
+            if msg.word(1) or message.attachments:
+                url = ''
+                if message.attachments:
+                    url = message.attachments[0].url
+                else:
+                    url = msg.words(1)
+
+                Globals.log.info(f'Adding url: {url}')
+                await message.channel.trigger_typing()
+                source = YTDLSource(url)
+                playlist = self.get_guild_playlist(message.guild.id)
+
+                source_loaded = await source.load()
+                media_info = source.data
+                if media_info.get('_type') == 'playlist':
+                    if len(media_info.get('entries')) > 1:
+                        await message.channel.send(f'Adding items from playlist...')
+                    else:
+                        del media_info['_type']
+                        media_info['title'] = media_info.get('entries')[0].get('title')
+                    for entry in media_info.get("entries"):
+                        source_single = YTDLSource(entry.get('url'))
+                        source_loaded_single = await source_single.load(playlist=True)
+                        media_info_single = source_single.data
+                        await playlist.add_song(AudioEntry(message, source_loaded_single, media_info_single))
+                        if not playlist.is_playing:
+                            await playlist.play(True)
+                else:
+                    if msg.word(0).lower() in ('addnext', 'an'):
+                        await playlist.add_next(AudioEntry(message, source_loaded, media_info))
+                        media_info['next'] = True
+                    else:
+                        await playlist.add_song(AudioEntry(message, source_loaded, media_info))
+
+                if media_info:
+                    if media_info.get('duration'):
+                        await message.channel.send(
+                            f'Added {"next " if media_info.get("next") else ""}**{media_info.get("title")}** [{str(timedelta(seconds=media_info.get("duration")))}] to playlist')
+                    elif media_info.get('_type') == 'playlist':
+                        await message.channel.send(
+                            f'Added {"next " if media_info.get("next") else ""}{len(media_info.get("entries"))} items from **{media_info.get("title")}** to playlist')
+                    else:
+                        await message.channel.send(
+                            f'Added {"next " if media_info.get("next") else ""}**{media_info.get("title")}** to playlist')
+                    if Globals.permissions.client_has_discord_permissions(('manage_messages',), message.channel):
+                        await message.delete()
+
+                    #######
+                    #embed = await self.get_infocard(message.guild.id)
+                    #await message.channel.send(embed=embed, )
+
+                    await playlist.play(True)
             else:
-                url = msg.words(1)
+                await message.channel.send('I need proper url :/')
 
-            Globals.log.info(f'Adding url: {url}')
-            await message.channel.trigger_typing()
-            source = YTDLSource(url)
-            playlist = self.get_guild_playlist(message.guild.id)
-
-            source_loaded = await source.load()
-            media_info = source.data
-            if media_info.get('_type') == 'playlist':
-                if len(media_info.get('entries')) > 1:
-                    await message.channel.send(f'Adding items from playlist...')
-                else:
-                    del media_info['_type']
-                    media_info['title'] = media_info.get('entries')[0].get('title')
-                for entry in media_info.get("entries"):
-                    source_single = YTDLSource(entry.get('url'))
-                    source_loaded_single = await source_single.load(playlist=True)
-                    media_info_single = source_single.data
-                    await playlist.add_song(AudioEntry(message, source_loaded_single, media_info_single))
-                    if not playlist.is_playing:
-                        await playlist.play(True)
-            else:
-                if msg.word(0).lower() in ('addnext', 'an'):
-                    await playlist.add_next(AudioEntry(message, source_loaded, media_info))
-                    media_info['next'] = True
-                else:
-                    await playlist.add_song(AudioEntry(message, source_loaded, media_info))
-
-            if media_info:
-                if media_info.get('duration'):
-                    await message.channel.send(
-                        f'Added {"next " if media_info.get("next") else ""}**{media_info.get("title")}** [{str(timedelta(seconds=media_info.get("duration")))}] to playlist')
-                elif media_info.get('_type') == 'playlist':
-                    await message.channel.send(
-                        f'Added {"next " if media_info.get("next") else ""}{len(media_info.get("entries"))} items from **{media_info.get("title")}** to playlist')
-                else:
-                    await message.channel.send(
-                        f'Added {"next " if media_info.get("next") else ""}**{media_info.get("title")}** to playlist')
-                if Globals.permissions.client_has_discord_permissions(('manage_messages',), message.channel):
-                    await message.delete()
-
-                #######
-                #embed = await self.get_infocard(message.guild.id)
-                #await message.channel.send(embed=embed, )
-
-                await playlist.play(True)
-        else:
-            await message.channel.send('I need proper url :/')
+        except AttributeError:
+            await message.channel.send('I can\'t play that :<')
 
     async def sub_play(self, message):
         playlist = self.get_guild_playlist(message.guild.id)

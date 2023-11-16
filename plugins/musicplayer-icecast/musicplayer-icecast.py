@@ -23,26 +23,28 @@ class Plugin(PluginBase):
         except Exception as e:
             Globals.log.error(f'Could not register metadataprovider: {e}')
 
-
     class IcecastMetadataProvider:
 
         def __init__(self):
             self.name = 'Icecast'
             self._previous_np = ''
             self._streamname = ''
+            self._np = ''
 
         async def metadata_update(self, audio_entry):
-            await self._get_stream_info(audio_entry.url)
-            audio_entry.info['title'] = self.api.np
-            self._previous_np = self.api.np
-            audio_entry.info['thumbnail'] = self.api.dj_image if not self.api.dj == 'Hanyuu-sama' else 'https://r-a-d.io/assets/logo_image_small.png'
+            info = await self._get_stream_info(audio_entry.url)
+            self._np = info['title']
+            audio_entry.info['title'] = info['title']
+            self._previous_np = self._np
+            audio_entry.info['thumbnail'] = ''
             audio_entry.info['is_live'] = True
+            self._streamname = info['name']
             audio_entry.info['name'] = f'{self._streamname or self.name}'
 
         async def on_update(self, fn, *args, **kwargs):
             Plugin.Jobs.add_interval_task(self, 'IcecastMetadataProvider', 10, self.on_update, fn, *args, **kwargs)
 
-            if self._previous_np != self.api.np:
+            if self._previous_np != self._np:
                 await self.metadata_update(*args)
                 await fn(*args, **kwargs)
 
@@ -51,7 +53,7 @@ class Plugin(PluginBase):
 
         def _test_icy(self, url):
             try:
-                if 'icy-metaint' in requests.head(url).headers.keys():
+                if 'icy-metaint' in requests.head(url, headers={'Icy-MetaData': '1'}).headers.keys():
                     return True
             except Exception:
                 return False
@@ -72,7 +74,7 @@ class Plugin(PluginBase):
                             if m:
                                 title = m.group(1)
                                 if title:
-                                    info['title'] = title.decode('latin1')
+                                    info['title'] = title.decode('utf-8')
                                     info['name'] = response.headers['icy-name']
                                     break
             except Exception:

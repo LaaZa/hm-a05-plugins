@@ -344,7 +344,7 @@ class Plugin(PluginBase):
         return False
 
     def remove_last_incomplete_sentence_gpt(self, text):
-        tokens = self.tokenizer.encode(text, max_length=4096, return_tensors='pt', truncation=True)
+        tokens = self.tokenizer.encode(text.rstrip('<'), max_length=4096, return_tensors='pt', truncation=True)
         token_list = tokens.tolist()[0]
 
         last_boundary_index = None

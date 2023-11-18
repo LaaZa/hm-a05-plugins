@@ -200,7 +200,12 @@ class YTDLSource:
         'default_search': 'ytsearch1',
         'extract_flat': 'in_playlist',
         'logger': Globals.log,
-        'source_address': '0.0.0.0'
+        'source_address': '0.0.0.0',
+        'postprocessors': [
+            {'key': 'SponsorBlock'},
+            {'key': 'ModifyChapters',
+             'remove_sponsor_segments': ['sponsor', 'intro', 'outro', 'selfpromo', 'preview', 'filler', 'interaction']}
+        ]
     }
 
     def __init__(self, url):
@@ -212,7 +217,7 @@ class YTDLSource:
         self.url = ''
 
     async def load(self, playlist=False):
-        data = await Globals.disco.loop.run_in_executor(None, self._func)
+        data = self.ytdl.sanitize_info(await Globals.disco.loop.run_in_executor(None, self._func))
 
         if playlist:
             if 'entries' in data:
@@ -236,7 +241,7 @@ class YTDLSource:
     @classmethod
     async def from_url(cls, url, *, loop=None):
         loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, cls.ytdl.extract_info, url)
+        data = cls.ytdl.sanitize_info(await loop.run_in_executor(None, cls.ytdl.extract_info, url))
 
         if 'entries' in data:
             # take first item from a playlist

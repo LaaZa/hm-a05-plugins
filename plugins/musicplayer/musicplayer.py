@@ -1,8 +1,10 @@
+import functools
 import urllib.parse
 from collections import defaultdict
 from datetime import timedelta
 
 import nextcord
+import yt_dlp
 
 from modules.globals import Globals, SavedVar
 from modules.pluginbase import PluginBase
@@ -11,6 +13,8 @@ from plugins.musicplayer.ui import PlayerView
 
 
 class Plugin(PluginBase):
+
+    pluginself = None
 
     def __init__(self):
         super().__init__()
@@ -33,6 +37,8 @@ class Plugin(PluginBase):
 
         self.client = Globals.disco
         self.playlists = {}
+
+        Plugin.pluginself = self
 
         def dds(): return defaultdict(set)
 
@@ -104,6 +110,56 @@ class Plugin(PluginBase):
         else:
             await message.channel.send('I can\'t play musicplayer here')
             return True
+
+    '''
+    SLASH COMMANDS
+    '''
+
+    @Globals.disco.slash_command(name='mp', description='Search music for music player.')
+    async def search_command(interaction: nextcord.Interaction,
+                             query: str = nextcord.SlashOption(description='Search query', required=True)
+                             ):
+
+        if not Plugin.pluginself.has_permission(interaction, 'add', True):
+            await interaction.response.send_modal(nextcord.ui.Modal('No permission!', timeout=5))
+
+        if query:
+            source = YTDLSource(query, no_playlist=True)
+            if interaction.guild.id not in Plugin.pluginself.playlists.keys():
+                Plugin.pluginself.playlists[interaction.guild.id] = PlayList(interaction.guild.voice_client, on_next_song=Plugin.pluginself.on_next_song)
+            playlist = Plugin.pluginself.get_guild_playlist(interaction.guild.id)
+
+            source_loaded = await source.load()
+            media_info = source.data
+            await interaction.response.send_message(f'Adding {media_info["title"]}', ephemeral=True)
+            await playlist.add_song(AudioEntry(interaction, source_loaded, media_info))
+            await playlist.play(True)
+
+        return
+
+    @staticmethod
+    @search_command.on_autocomplete('query')
+    async def search_autocomplete(interaction: nextcord.Interaction, query: str):
+        if not Plugin.pluginself.has_permission(interaction, 'add', True):
+            await interaction.response.send_modal(nextcord.ui.Modal('No permission!', timeout=5))
+            return
+
+        if len(query) >= 6:
+            with yt_dlp.YoutubeDL({
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'ignoreerrors': True,
+                'extract_flat': True,
+            }) as ytdl:
+                _func = functools.partial(ytdl.extract_info, f'ytsearch10:{query}', download=False)
+                results = ytdl.sanitize_info(await Globals.disco.loop.run_in_executor(None, _func))
+
+                results_flat = {r['title']: r['url'] for r in results['entries']}
+
+                await interaction.response.send_autocomplete(results_flat)
+
+        return
 
     '''
     UTILITY FUNCTIONS

@@ -20,7 +20,10 @@ class AudioEntry:
     __slots__ = ('added_by', 'channel', 'message', 'source', 'info')
 
     def __init__(self, message, source, info):
-        self.added_by = message.author
+        try:
+            self.added_by = message.author
+        except AttributeError:
+            self.added_by = message.user
         self.channel = message.channel
         self.message = message
         self.source = source
@@ -208,7 +211,8 @@ class YTDLSource:
         ]
     }
 
-    def __init__(self, url):
+    def __init__(self, url, no_playlist=False):
+        self.ytdl_format_options['noplaylist'] = no_playlist
         self.ytdl = youtube_dl.YoutubeDL(self.ytdl_format_options)
         self._url = url
         self._func = functools.partial(self.ytdl.extract_info, url, download=False)

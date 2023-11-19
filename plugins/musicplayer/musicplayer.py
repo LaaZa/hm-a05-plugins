@@ -115,7 +115,7 @@ class Plugin(PluginBase):
     SLASH COMMANDS
     '''
 
-    @Globals.disco.slash_command(name='mp', description='Search music for music player.')
+    @Globals.disco.slash_command(name='mp', description='Search music for music player.', dm_permission=False)
     async def search_command(interaction: nextcord.Interaction,
                              query: str = nextcord.SlashOption(description='Search query', required=True)
                              ):

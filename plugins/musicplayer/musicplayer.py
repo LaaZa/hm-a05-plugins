@@ -121,7 +121,7 @@ class Plugin(PluginBase):
                              ):
 
         if not Plugin.pluginself.has_permission(interaction, 'add', True):
-            await interaction.response.send_modal(nextcord.ui.Modal('No permission!', timeout=5))
+            await interaction.response.send_message('No permission!', ephemeral=True, delete_after=5)
 
         if query:
             source = YTDLSource(query, no_playlist=True)
@@ -141,7 +141,7 @@ class Plugin(PluginBase):
     @search_command.on_autocomplete('query')
     async def search_autocomplete(interaction: nextcord.Interaction, query: str):
         if not Plugin.pluginself.has_permission(interaction, 'add', True):
-            await interaction.response.send_modal(nextcord.ui.Modal('No permission!', timeout=5))
+            await interaction.response.send_message('No permission!', ephemeral=True, delete_after=5)
             return
 
         if len(query) >= 6:

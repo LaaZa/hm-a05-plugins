@@ -48,7 +48,7 @@ class Plugin(PluginBase):
 
         self.prompt_format = '{{system}}\n{{chardef}}\n{{personality}}\n{{scenario}}\n'
 
-        self.system_mes = f"<|system|>Enter RP mode. You shall reply to {{user}} while staying in character. Your responses must be detailed, creative, immersive, and drive the scenario forward. You will follow {self.character_name}'s persona."
+        self.system_mes = f"<|system|>Enter RP mode. You shall reply to {{{{user}}}} while staying in character. Your responses must be detailed, creative, immersive, and drive the scenario forward. You will follow {self.character_name}'s persona."
 
         self.charadef = '''[character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "3 pet male gerbils called Lux, Pax and Nux, located in the real world")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]'''
 
@@ -152,7 +152,7 @@ class Plugin(PluginBase):
                 if response:
                     Globals.log.debug(f'{self.emo_counter[message.channel]}')
                     emotional = False
-                    if self.emo_counter[message.channel] == 0 and (emo := await self.sentiment.emotion(response, 0.95)):
+                    if self.emo_counter[message.channel] == 0 and (emo := await self.sentiment.emotion(response, 0.70)):
                         sent_msg = await message.channel.send(file=nextcord.File(BotPath.static / 'small' / self.emotions.get(emo)), content=f"{response}")
                         self.emo_counter[message.channel] += 1
                         emotional = True
@@ -187,7 +187,7 @@ class Plugin(PluginBase):
 
         mes_list = self.dynamicmemory.memory_id_prompt(self.history_man.get_history(message.message.channel)[-4:])
         for mes in mes_list:
-            memory_messages.append(self.history_man.get_history_slice_by_id(mes, 3))
+            memory_messages.append(self.history_man.get_history_slice_by_id(mes, 3, message.message.author.id))
 
         for mem_msg in memory_messages:
             if isinstance(mem_msg, list):
@@ -225,6 +225,7 @@ class Plugin(PluginBase):
             prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n{conversation}<|model|>{self.character_name}:'
         #optimize prompt
         prompt = re.sub(r'(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
+        prompt = prompt.replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         Globals.log.debug(f'{prompt=}')
         self.messages_since_topic += 1
         return prompt
@@ -403,12 +404,12 @@ class Plugin(PluginBase):
 
             return [item for sublist in messages for item in sublist]  # flatten
 
-        def get_history_slice_by_id(self, message_id, slice_size=3):
+        def get_history_slice_by_id(self, message_id, slice_size=3, user_id=None):
             center_idx = None
             channel = None
             for messages_channel in self.prompt_histories.values():
                 try:
-                    idx, message = [(idx, mes.message) for idx, mes in enumerate(messages_channel) if mes.message.id == message_id][0]
+                    idx, message = [(idx, mes.message) for idx, mes in enumerate(messages_channel) if mes.message.id == message_id and mes.message.author.id == (user_id or mes.message.author.id)][0]
                     center_idx = idx
                     channel = message.channel
                     break

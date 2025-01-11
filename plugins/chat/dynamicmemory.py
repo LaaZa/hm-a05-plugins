@@ -18,6 +18,7 @@ class DynamicMemory:
     def __init__(self, max_messages=5):
         Globals.log.info(f'Loading Dynamic Memory...')
         nltk.download('punkt')
+        nltk.download('punkt_tab')
         self.max_messages = max_messages
         #self._model = SentenceTransformer('randypang/intent-simple-chat')
         #self._model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')

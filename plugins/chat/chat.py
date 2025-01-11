@@ -10,6 +10,7 @@ import aiosqlite
 import nextcord
 import re
 import aiohttp
+from jinja2 import Environment
 from collections import defaultdict
 from modules.globals import Globals, BotPath
 from modules.pluginbase import PluginBase
@@ -17,7 +18,9 @@ from plugins.chat.summarize import Summarizer
 from plugins.chat.sentiment import Sentiment
 from plugins.chat.caption import Caption
 from plugins.chat.dynamicmemory import DynamicMemory
+from plugins.chat.templates import CHAT_TEMPLATE, MEMORY_EXTRACTION_TEMPLATE
 from transformers import LlamaTokenizer
+from ollama import AsyncClient
 
 
 class Plugin(PluginBase):
@@ -27,28 +30,36 @@ class Plugin(PluginBase):
         self.name = 'ChatBot'
         self.add_trigger('on_message', re.compile('.*'), False, self.on_message)
         self.help = 'Acts as a chatbot, generating dialogue with context'
-        self.api_url = 'http://localhost:5001/api/v1/generate'
+        self.api_url = 'http://localhost:11434'
         self.character_name = 'Miharu'
         self.history_man = self.PromptHistoryManager(self)
         self.sentiment = Sentiment()
         self.captioner = Caption()
-        self.tokenizer = LlamaTokenizer.from_pretrained('PygmalionAI/pygmalion-2-13b')
+        self.tokenizer = LlamaTokenizer.from_pretrained('SanjiWatsuki/Silicon-Maid-7B')
         self.dynamicmemory = DynamicMemory()
         self.temperature = 0.5
         self.kobold = True
         self.messages_since_topic = 0
         self.first_load = True
 
+        #load templates
+        self.jinja_env = Environment()
+        self.chat_template = self.jinja_env.from_string(CHAT_TEMPLATE)
+        self.memory_extraction_template = self.jinja_env.from_string(MEMORY_EXTRACTION_TEMPLATE)
+
         # load custom config
         try:
             self.api_url = Globals.config_data.get_opt('chat', 'apiurl')
-            self.kobold = Globals.config_data.get_opt('chat', 'apikobold')
+            #self.kobold = Globals.config_data.get_opt('chat', 'apikobold')
         except KeyError as e:
             Globals.log.error('using default config for chat')
 
+        self.model_tag = "### Response:"
+        self.user_tag = "### Instruction:"
+
         self.prompt_format = '{{system}}\n{{chardef}}\n{{personality}}\n{{scenario}}\n'
 
-        self.system_mes = f"<|system|>Enter RP mode. You shall reply to {{{{user}}}} while staying in character. Your responses must be detailed, creative, immersive, and drive the scenario forward. You will follow {self.character_name}'s persona."
+        self.system_mes = f"Enter RP mode. You shall reply to {{{{user}}}} while staying in character. {{{{user}}}} is also known as {{{{user_nick}}}}. Your responses must be detailed, creative, immersive, and drive the scenario forward. Answer naturally in a short Discord message. You will follow {self.character_name}'s persona."
 
         self.charadef = '''[character("{{char}}")\n{\nSpecies("android" + "robot" + "bot")\nPersonality("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nMind("carefree" + "clumsy" + "energetic" + "food lover" + "friendly" + "funny" + "nature lover" + "outgoing" + "puffy" + "third person")\nFeatures("Orange hair" + "Blue eyes")\nHeight("153 cm")\nWeight("39 kg")\nBody("pale" + "slim" + "small breasts" + "teen")\nGender("female")\nDescription("{{char}} is experiencing lots of things for the first time" + "{{char}}'s enthusiasm often overrules her common sense" + "{{char}} enjoys eating bananas" + "{{char}} sometimes talks in third person" + "{{char}} is always in Discord and does not leave and has no work or school")\nFavourite food("bananas" + "food containing bananas" + "chocobanana")\nClothes("white headband" + "school uniform")\nLikes("bananas" + "her creator")\nCreator("LaaZa")\nFamily("LaaZa who is male human" + "3 pet male gerbils called Lux, Pax and Nux, located in the real world")\nLocation("virtual world of {{char}}'s own imagination" + "{{char}}'s has a virtual room" + "{{char}} is always connected to the chat and never leaves")\n"{{char}} has real friends and imaginary ones. Everyone in the chat is in the real world and are real. {{char}} knows she cannot interact with the real world directly only through text. {{char}} knows she has certain limitations, like consuming entertainment, she likes to imagine them instead and wants to hear other tell her about different stories. {{char}} does not understand about technology"\n}]'''
 
@@ -195,14 +206,14 @@ class Plugin(PluginBase):
                 for msg in mem_msg:
                     author = msg.message.author.display_name
                     author = author if author != Globals.disco.user.name else self.character_name
-                    hist.append(f'{"<|model|>" if author == self.character_name else "<|user|>"}{author}: {msg.message.content}')
+                    hist.append(f'{self.model_tag if author == self.character_name else self.user_tag}{author}: {msg.message.content}')
                 if hist:
                     hist = "".join(hist)
                     memory.append(f'<START>{hist}')
             else:
                 author = mem_msg.message.author.display_name
                 author = author if author != Globals.disco.user.name else self.character_name
-                memory.append(f'<START>{"<|model|>" if author == self.character_name else "<|user|>"}{author}: {mem_msg.message.content}')
+                memory.append(f'<START>\n{self.model_tag if author == self.character_name else self.user_tag}{author}: {mem_msg.message.content}')
 
         if memory:
             memory_prompt = ''.join(memory)
@@ -216,94 +227,139 @@ class Plugin(PluginBase):
         scenario = self.history_man.get_scenario(message.message.channel).replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
         conversation = self.history_man.get_history_prompt(message.message.channel)
         #prompt = f"{memory_prompt}{charadef}\n{conversation}\n{self.character_name}:"
-        prompt = ''
-        if memory_prompt:
+
+        #if memory_prompt:
             #prompt = f"{charadef}\nThis reminds you of these events from your past: [{memory_prompt}]\n\n<START>{conversation}\n{self.character_name}:"\
             #prompt = f"This reminds you of these events from your past: [{memory_prompt}]\n\n{charadef}\n\n{conversation}\n{self.character_name}:"
-            prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n[{memory_prompt}]\n{conversation}<|model|>{self.character_name}:'
-        else:
-            prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n{conversation}<|model|>{self.character_name}:'
+            #prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n[{memory_prompt}]\n{conversation}{self.model_tag}{self.character_name}:'
+        #else:
+            #prompt = f'{self.system_mes}\n{self.charadef}\n{self.personality}\n{scenario}\n{conversation}{self.model_tag}{self.character_name}:'
+
+        prompt = self.chat_template.render(
+            system_mes=self.system_mes,
+            charadef=self.charadef,
+            scenario=scenario,
+            memory_prompt=memory_prompt,
+            conversation=conversation,
+            model_tag=self.model_tag,
+            user_tag=self.user_tag,
+            bot_name=self.character_name,
+            bot_username=Globals.disco.user,
+            example_messages=self.examplemessages
+        )
+
+
         #optimize prompt
-        prompt = re.sub(r'(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
-        prompt = prompt.replace('{{user}}', message.message.author.display_name).replace('{{char}}', self.character_name)
+        #prompt = re.sub(r'(\n\s+)|(\s+\n)|(\s{2,})', '', prompt)
+        prompt = prompt.replace('{{user}}', message.message.author.name).replace('{{char}}', self.character_name).replace('{{user_nick}}', message.message.author.display_name or message.message.author.global_name)
         Globals.log.debug(f'{prompt=}')
         self.messages_since_topic += 1
         return prompt
 
     async def generate_response(self, prompt):
-        async with aiohttp.ClientSession() as session:
-            payload = {}
-            if self.kobold:
-                payload = {
-                    'prompt': prompt,
-                    'use_story': False,
-                    'use_memory': False,
-                    'use_authors_note': False,
-                    'use_world_info': False,
-                    'max_context_length': 4096,
-                    'max_length': 80,
-                    'rep_pen': 1.1,
-                    'rep_pen_range': 2048,
-                    'rep_pen_slope': 0.2,
-                    'temperature': self.temperature,
-                    'tfs': 1,
-                    'top_a': 0,
-                    'top_k': 0,
-                    'top_p': 0.73,
-                    'typical': 1,
-                    'sampler_order': [
-                        6, 0, 1, 3,
-                        4, 2, 5
-                    ],
-                    'singleline': True,
-                    'stop_sequence': [
-                        '<|user|>',
-                        '<|model|>',
-                        '<|user',
-                        '<',
-                        '<|',
-                        '|',
-                        '\n'
-                    ]
-                }
-            else:
-                payload = {
-                    'prompt': prompt,
-                    'do_sample': True,
-                    'truncation_length': 2048,
-                    'max_new_tokens': 80,
-                    'repetition_penalty': 1.18,
-                    'temperature': self.temperature,
-                    'top_p': 0.9,
-                    'typical_p': 1,
-                    'min_length': 0,
-                    'no_repeat_ngram_size': 0,
-                    'num_beams': 1,
-                    'penalty_alpha': 0,
-                    'length_penalty': 1,
-                    'early_stopping': False,
-                    'seed': -1,
-                    'add_bos_token': True,
-                    'ban_eos_token': False,
-                    'skip_special_tokens': True,
-                    'stopping_strings': ['\n']
-                }
+        # async with aiohttp.ClientSession() as session:
+        #     payload = {}
+        #     if self.kobold:
+        #         payload = {
+        #             'prompt': prompt,
+        #             'use_story': False,
+        #             'use_memory': False,
+        #             'use_authors_note': False,
+        #             'use_world_info': False,
+        #             'max_context_length': 4096,
+        #             'max_length': 80,
+        #             'rep_pen': 1.1,
+        #             'rep_pen_range': 2048,
+        #             'rep_pen_slope': 0.2,
+        #             'temperature': self.temperature,
+        #             'tfs': 1,
+        #             'top_a': 0,
+        #             'top_k': 0,
+        #             'top_p': 0.73,
+        #             'typical': 1,
+        #             'sampler_order': [
+        #                 6, 0, 1, 3,
+        #                 4, 2, 5
+        #             ],
+        #             'singleline': True,
+        #             'stop_sequence': [
+        #                 '<|user|>',
+        #                 '<|model|>',
+        #                 '<|user',
+        #                 '<',
+        #                 '<|',
+        #                 '|',
+        #                 '\n'
+        #             ]
+        #         }
+        #     else:
+        #         payload = {
+        #             'prompt': prompt,
+        #             'do_sample': True,
+        #             'truncation_length': 2048,
+        #             'max_new_tokens': 80,
+        #             'repetition_penalty': 1.18,
+        #             'temperature': self.temperature,
+        #             'top_p': 0.9,
+        #             'typical_p': 1,
+        #             'min_length': 0,
+        #             'no_repeat_ngram_size': 0,
+        #             'num_beams': 1,
+        #             'penalty_alpha': 0,
+        #             'length_penalty': 1,
+        #             'early_stopping': False,
+        #             'seed': -1,
+        #             'add_bos_token': True,
+        #             'ban_eos_token': False,
+        #             'skip_special_tokens': True,
+        #             'stopping_strings': ['\n']
+        #         }
+        #
+        #     async with session.post(self.api_url, json=payload) as resp:
+        #         if resp.status == 200:
+        #             response_data = await resp.json()
+        #             generated_text = response_data['results'][0]['text']
+        #             response = generated_text.split(f"{self.character_name}:")[-1].strip()
+        #             #prune = re.sub(r'\n.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
+        #             cleaned = self.remove_last_incomplete_sentence_gpt(response)
+        #             #cleaned = response
+        #             Globals.log.debug(f'{cleaned=}')
+        #             if cleaned != response:
+        #                 Globals.log.debug(f'Original {response=}')
+        #             return cleaned
+        #         else:
+        #             Globals.log.error(f'{resp.status=}')
+        #             return None
 
-            async with session.post(self.api_url, json=payload) as resp:
-                if resp.status == 200:
-                    response_data = await resp.json()
-                    generated_text = response_data['results'][0]['text']
-                    response = generated_text.split(f"{self.character_name}:")[-1].strip()
-                    #prune = re.sub(r'\n.+?:.*$', '', response, flags=re.MULTILINE | re.DOTALL).rstrip()
-                    cleaned = self.remove_last_incomplete_sentence_gpt(response)
-                    #cleaned = response
-                    Globals.log.debug(f'{cleaned=}')
-                    if cleaned != response:
-                        Globals.log.debug(f'Original {response=}')
-                    return cleaned
-                else:
-                    Globals.log.error(f'{resp.status=}')
-                    return None
+        payload = {
+            'prompt': prompt,
+            'options': {
+                'num_ctx': 12000,
+                'num_predict': 80,
+                'rep_pen': 1,
+                'rep_pen_range': 2048,
+                'rep_pen_slope': 1,
+                'temperature': self.temperature,
+                'tfs': 1,
+                'top_a': 0,
+                'top_k': 0,
+                'top_p': 1,
+                'typical': 1,
+                'penalize_newline': True,
+                'stop_sequence': [
+                    '\n'
+                ]
+            }
+        }
+        client = AsyncClient(host=self.api_url)
+        response = await client.generate(model='Silicon-maid', **payload)
+        text_response = response['response'].split(f"{self.character_name}:")[-1].strip()
+        cleaned = self.remove_last_incomplete_sentence_gpt(text_response)
+
+        Globals.log.debug(f'{cleaned=}')
+        if cleaned != text_response:
+            Globals.log.debug(f'Original {text_response=}')
+        return cleaned
 
     def auto_capitalize_sentences(self, text, pattern=re.compile(r'((?<!\.)[!?]\s+|(?<![.])[.]\s+|\(\s*|"\s*|(?<=\s)i(?=\s))(\w)')):
         if not text:
@@ -383,6 +439,69 @@ class Plugin(PluginBase):
 
         return temperature
 
+    async def generate_memories(self, conversation: list):
+        memories = []
+
+        prompt = self.memory_extraction_template.render(
+            conversation=conversation,
+            model_tag=self.model_tag,
+            user_tag=self.user_tag,
+            bot_name=self.character_name,
+            bot_username=Globals.disco.user,
+        )
+
+        payload = {
+            'prompt': prompt,
+            'options': {
+                'num_ctx': 12000,
+                'num_predict': 512,
+                'rep_pen': 1.3,
+                'rep_pen_range': 512,
+                'rep_pen_slope': 0.2,
+                'temperature': 0.75,
+                'tfs': 1,
+                'top_a': 0,
+                'top_k': 40,
+                'top_p': 0.9,
+                'typical': 1
+            }
+        }
+
+        client = AsyncClient(host=self.api_url)
+        response = await client.generate(model='Silicon-maid', **payload)
+        Globals.log.debug(f'{response=}')
+        try:
+            examples = [
+                {
+                    "name": "LaaZa",
+                    "memory": "LaaZa is a Finnish man and my creator.",
+                    "category": "personal info"
+                },
+                {
+                    "name": "Miharu",
+                    "memory": "I said I loved LaaZa very much and I'm grateful he created me.",
+                    "category": "feelings"
+                },
+                {
+                    "name": "LaaZa",
+                    "memory": "LaaZa said he updated my memory system.",
+                    "category": "events"
+                },
+                {
+                    "name": "Miharu",
+                    "memory": "I agreed when LaaZa said that I don't need to be concerned about technical details.",
+                    "category": "interactions"
+                }
+            ]
+
+
+            memories = json.loads(response['response'])['memories']
+            memories = [memory for memory in memories if memory not in examples]
+            Globals.log.debug(f'{memories=}')
+        except Exception as e:
+            Globals.log.error(f'{e=}')
+
+
     class PromptHistoryManager:
         def __init__(self, main, max_history_length=20):
             #self.prompt_histories = defaultdict(lambda: deque(maxlen=max_history_length))
@@ -433,14 +552,17 @@ class Plugin(PluginBase):
             for i, message in enumerate(reversed(history)):
                 if i > limit:
                     break
-                if max_age and datetime.datetime.utcnow() - max_age > message.message.created_at:
+                if max_age and datetime.datetime.now(datetime.UTC) - max_age > message.message.created_at:
                     continue  # do not get too old messages
                 author = message.message.author.display_name
                 author = author if author != Globals.disco.user.name else self.main.character_name  # Use the friendly name in prompt
-                prompt_list.insert(0, f"{'<|model|>' if author == self.main.character_name else '<|user|>'}{author}: {str(message)}")
+                #prompt_list.insert(0, f"{self.main.model_tag if author == self.main.character_name else self.main.user_tag}{author}: {str(message)}")
+                #message.extra['friendly_name'] = author
+                prompt_list.insert(0, message)
 
-            prompt = ''.join(prompt_list)
-            return prompt
+
+            #prompt = ''.join(prompt_list)
+            return prompt_list
 
         def get_histories(self):
             return self.prompt_histories
@@ -519,7 +641,7 @@ class Plugin(PluginBase):
                             channel = nextcord.utils.get(client.get_all_channels(), id=int(channel_id))
 
                         if channel not in channel_histories.keys():
-                            channel_histories[channel] = await channel.history(limit=500).flatten()
+                            channel_histories[channel] = [item async for item in channel.history(limit=500)]
 
                         messages = []
                         message_ids = json.loads(message_ids_data)
@@ -562,7 +684,7 @@ class Plugin(PluginBase):
                     fakemes.content = text
                     self.message = fakemes
                     self.extra['fake'] = True
-                    self.extra['timestamp'] = created_at or datetime.datetime.utcnow()
+                    self.extra['timestamp'] = created_at or datetime.datetime.now(datetime.UTC)
                     self.extra['timestamp'] = self.extra['timestamp'].isoformat()
                     self.extra['text'] = text
                     self.extra['author_id'] = author.id if author else Globals.disco.user.id
@@ -598,4 +720,19 @@ class Plugin(PluginBase):
         @property
         def is_fake(self):
             return self.extra.get('fake', False)
-        
+
+        @property
+        def author(self):
+            return self.message.author
+
+        @property
+        def channel(self):
+            return self.message.channel
+
+        @property
+        def content(self):
+            return str(self)
+
+        @property
+        def display_name(self):
+            return self.message.author.display_name
